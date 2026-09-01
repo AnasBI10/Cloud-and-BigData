@@ -318,3 +318,22 @@ Wetter-Export) sowie die Abschnitte 1–3 dieser README sind fertig — siehe
       geschrieben wird.
 - [ ] Baseline-Parquet-Dateien nach MinIO verschieben, sobald SCRUM-78
       steht; Pfad in `DATA_SOURCES.md` nachtragen.
+
+
+## 4. Komponenten und Datenfluss
+
+## 5. Processing-Logik
+
+## 6. Speicherkonzept
+
+## 7. User-facing UI
+
+## 8. Kubernetes-Deployment
+
+## 9. Deployment-Anleitung
+
+## 10. Wesentliche Codeabschnitte
+
+## 11. Screenshots und Nachweise
+
+## 12. Grenzen des Prototyps und Ausblick      
