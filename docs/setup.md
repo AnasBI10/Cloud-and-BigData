@@ -90,7 +90,11 @@ Instanz ein Befehl - bestehende Pods bleiben unveraendert:
     sudo k3s kubectl get sc
     sudo k3s kubectl get pods -A
 
+##Verbindungsbefehl
+ssh -i C:\Users\boudhaim\.ssh\nyc_key ubuntu@2001:7c0:1b20:c913:1::4b1
+
 ## Versionen
+
 
 Ubuntu Server 24.04 LTS | k3s v1.36.4+k3s1 | m1.extra_large (4 vCPU) |
 StorageClass local-path | OpenStack, DHBW 4C-Cloud
