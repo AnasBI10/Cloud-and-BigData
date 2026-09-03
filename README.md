@@ -34,7 +34,7 @@ als standardisierte Abweichung der beobachteten Geschwindigkeit vom erwarteten
 Baseline-Profil (korrigiert um Wetterlage) und macht die verbleibenden Ausreißer
 auf einer Karte sichtbar.
 
-#### Warum ist das ein Big-Data-Problem? (Kriterienmigration)
+#### Warum ist das ein Big-Data-Problem?
 
 Das löst kein Query-Tool und keine Excel-Pivot-Table. Hier sind die V5-Kriterien:
 
@@ -42,8 +42,8 @@ Das löst kein Query-Tool und keine Excel-Pivot-Table. Hier sind die V5-Kriterie
 |-----------|---------|--------|
 | **Volume** | Baseline braucht 6–12 Monate × 125 Segmente = ~10 Mio. Zeilen. Eine einzelne CSV-Query schlägt fehl. | Stream-Verarbeitung mit vorberechneter Broadcast-Baseline (nicht im State angelernt). |
 | **Velocity** | Meldung nach 30 Min. ist wertlos — Stauwarnung verfällt mit ihrem Alter. "Alte Daten sind keine schlechten Daten, sie sind gar keine Daten." | Live-Stream-Verarbeitung: Event → Filter → Join → Score → Dashboard in < 5 Min. |
-| **Variety** | Zwei Ströme mit ungleicher Frequenz (Verkehr ~7,7 Min. je Segment, Wetter ~5 Min. je Borough) und Granularität (125 Segmente vs. 5 Boroughs) erfordern explizites Enrichment-Design. Einfacher Stream-Stream-Join reicht nicht. | Stream-Static-Join: Verkehr gegen letzten Wetterstand, nicht beidseitige Watermarks. |
-| **Veracity** | 49 % der Rohmeldungen sind Sentinel-Werte (`status=-101`, speed=0). Dieser Filter muss ÜBERALL greifen — Live und Reprocessing identisch. | Kappa-Architektur: ein Codepfad, eine Filterregel, überall angewendet. |
+| **Variety** | Zwei Ströme mit ungleicher Frequenz (Verkehr ~7,7 Min. je Segment, Wetter ~5 Min. je Borough) und Granularität (125 Segmente vs. 5 Boroughs) erfordern explizites Enrichment-Design. | Stream-Static-Join: Verkehr gegen letzten Wetterstand, nicht beidseitige Watermarks. |
+| **Veracity** | 49 % der Rohmeldungen sind Sentinel-Werte (status=-101, speed=0). Dieser Filter muss überall greifen — Live und Reprocessing identisch. | Kappa-Architektur: ein Codepfad, eine Filterregel, überall angewendet. |
 | **Value** | Rohdaten über 125 Segmente unsortiert = Information Overload. Nur der Score zeigt, wo Eingriff lohnt. | Aggregation + Ranking + Visualisierung: Top-5-Anomalien auf Karte, nicht 125 Zahlenwerte. |
 
 ---
@@ -66,12 +66,12 @@ separate Geometriequelle (Segmentpolylinien sind im DOT-Feed enthalten).
 Die TLC Taxi-Daten locken mit ~1,5 Mrd. historischen Zeilen — eine eindrucksvolle
 Zahl für ein Volume-Argument. Aber sie passen nicht:
 
-| Anforderung | NYC DOT Traffic Speeds | TLC Trip Records | Konsequenz |
+| Anforderung | NYC DOT Traffic Speeds | TLC Trip Records | Bewertung |
 |---|---|---|---|
-| **Messgröße** | Geschwindigkeit je Straßensegment (km/h) | Fahrzeit pro Taxi-Zone (Minuten) | ❌ Nicht vergleichbar |
-| **Raum-Schlüssel** | `link_id` (TRANSCOM Segment, ~150–250 m Länge) | Taxi-Zone-ID (Quartiere) | ❌ Zu grobkörnig, falsche Aggregation |
-| **Vollständigkeit** | 24/7 Live-Feed seit 17.04.2017 | Nur Trip-Records (wenn Fahrt endet) | ⚠️ Messereignisse unterschiedlich |
-| **Baseline-Gleichheit** | Historische Geschwindigkeit = Live-Geschwindigkeit | Ableitung aus Trip-Zeiten ≠ direkte Messung | ❌ Apfel-Birnen-Vergleich |
+| Messgröße | Geschwindigkeit je Straßensegment (km/h) | Fahrzeit pro Taxi-Zone (Minuten) | Nicht vergleichbar |
+| Raum-Schlüssel | link_id (TRANSCOM Segment, ~150–250 m Länge) | Taxi-Zone-ID (Quartiere) | Zu grobkörnig, falsche Aggregation |
+| Vollständigkeit | 24/7 Live-Feed seit 17.04.2017 | Nur Trip-Records (wenn Fahrt endet) | Messereignisse unterschiedlich |
+| Baseline-Gleichheit | Historische Geschwindigkeit = Live-Geschwindigkeit | Ableitung aus Trip-Zeiten ≠ direkte Messung | Apfel-Birnen-Vergleich |
 
 **Entscheidung:** NYC DOT nutzen. Die Größe anderer Datasets ist kein ehrliches Argument,
 wenn sie nicht auf die Problemstellung passen.
@@ -130,7 +130,7 @@ Abschnitt 1.2) — eine fremde Zahl über nicht genutzte Daten wäre kein ehrlic
 | Meldefrequenz je Sensor, DOT-Feed | ~alle 7,7 Minuten (23.394 ÷ 125) |
 | Poll-Intervall Wetter | 5 Minuten je Borough |
 | Cache-Staleness DOT-Feed | beobachtet bis zu ~3 Stunden zwischen Antwortzeit und `Truth-Last-Modified` |
-| Ziel-Latenz Ende-zu-Ende (Event → Dashboard) | *[zu messen, sobald SCRUM-77 läuft]* |
+| Ziel-Latenz Ende-zu-Ende (Event → Dashboard) | [zu messen, sobald SCRUM-77 läuft] |
 
 Der Cache-Staleness-Befund ist praktisch relevant, nicht nur akademisch: Der
 SODA2-Endpunkt liefert laut Response-Header (`X-SODA2-Data-Out-Of-Date: true`)
@@ -252,10 +252,10 @@ MinIO und werden über eine Serving-API an die UI zurückgegeben.
 
 | Vorlesung | Unsere Wahl | Begründung |
 |---|---|---|
-| HDFS | **MinIO (S3-kompatibel)** | HDFS ist auf Data Locality ausgelegt. Auf Kubernetes ist Compute ohnehin von Storage getrennt, der NameNode wäre ein Single Point of Failure und ein zusätzl[...] |
-| Reines Parquet | **Delta Lake** | ACID-Commits verhindern, dass die Serving-Schicht halbgeschriebene Dateien liest. Zusätzlich Schema Evolution, falls das Event-Schema im Verlauf erweitert wir[...] |
-| JSON auf dem Bus | **Avro + Schema-Registry** | Ein durchsetzbarer Schema-Vertrag zwischen Producer und Consumer. Die Registry prüft Kompatibilität beim Registrieren, nicht erst beim Absturz [...] |
-| Einzelner Datenstrom | **Zwei unabhängige Ströme mit Join** | Verkehr allein erklärt keine Auffälligkeit (siehe Abschnitt 1.1: Bei Regen wird alles langsamer). Der Wetterstrom macht aus der[...] |
+| HDFS | **MinIO (S3-kompatibel)** | HDFS ist auf Data Locality ausgelegt. Auf Kubernetes ist Compute ohnehin von Storage getrennt, der NameNode wäre ein Single Point of Failure und ein zusätzlicher Single Point of Failure. MinIO ist S3-kompatibel und skaliert horizontal. |
+| Reines Parquet | **Delta Lake** | ACID-Commits verhindern, dass die Serving-Schicht halbgeschriebene Dateien liest. Zusätzlich Schema Evolution, falls das Event-Schema im Verlauf erweitert wird. |
+| JSON auf dem Bus | **Avro + Schema-Registry** | Ein durchsetzbarer Schema-Vertrag zwischen Producer und Consumer. Die Registry prüft Kompatibilität beim Registrieren, nicht erst beim Absturz eines Consumer. |
+| Einzelner Datenstrom | **Zwei unabhängige Ströme mit Join** | Verkehr allein erklärt keine Auffälligkeit (siehe Abschnitt 1.1: Bei Regen wird alles langsamer). Der Wetterstrom macht aus der bloßen Verkehrsmessung ein kontextabhängiges Signal. |
 
 ### 3.4 Neue Infrastrukturanforderungen aus der Architekturentscheidung
 
