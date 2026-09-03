@@ -1,0 +1,70 @@
+# Architektur-Abweichungen vom Vorlesungsstandard
+
+Story: Technologie-Abweichungen festlegen und begründen
+Bezug: Bonus "Eigenständigkeit und Innovation" (bis +10 Punkte)
+
+Diese Datei begründet bewusste Abweichungen vom in der Vorlesung gezeigten
+Standardweg. Jede Abweichung wird mit Standard, Alternative und Mehrwert
+dokumentiert – Voraussetzung für die Anrechnung als Bonuspunkt.
+
+## 1. Objektspeicher (MinIO) statt HDFS
+
+**Standard:** HDFS als verteiltes Dateisystem für den Data Lake.
+
+**Unsere Wahl:** MinIO als S3-kompatibler Objektspeicher.
+
+**Begründung:** MinIO ist deutlich leichtgewichtiger auf Kubernetes zu betreiben
+als HDFS – keine NameNode/DataNode-Topologie, kein separates HA-Konzept nötig.
+Die S3-kompatible API ist der De-facto-Standard für moderne Lakehouse-Anbindungen
+(Spark, Delta Lake, Trino unterstützen sie nativ) und ermöglicht einen späteren
+Wechsel auf einen Cloud-Objektspeicher ohne Codeänderung.
+
+## 2. k3s statt klassischem Kubernetes (kubeadm)
+
+**Standard:** Kubernetes-Cluster über kubeadm aufgesetzt.
+
+**Unsere Wahl:** k3s als leichtgewichtige, CNCF-zertifizierte Distribution.
+
+**Begründung:** k3s ist funktional vollwertiges Kubernetes (Deployments,
+StatefulSets, PVCs, Services – keine Einschränkungen), installiert sich aber
+in einem Befehl und hat deutlich geringeren Ressourcen-Overhead. Das war bei
+begrenztem vCPU-Kontingent auf der genutzten Cloud-Infrastruktur entscheidend.
+Zusätzlich bringt k3s StorageClass (local-path) und Metrics-Server bereits mit,
+was manuelle Zusatzinstallationen erspart.
+
+## 3. Delta Lake statt reinem Parquet
+
+**Standard:** Parquet-Dateien als Speicherformat im Data Lake.
+
+**Unsere Wahl:** Delta Lake als Tabellenformat auf Basis von Parquet.
+
+**Begründung:** Delta Lake ergänzt Parquet um ACID-Transaktionen, Schema-Evolution
+und Time-Travel. Das ist speziell für die Bronze/Silver/Gold-Schichtung relevant,
+da parallele Schreib- und Lesezugriffe auf dieselbe Tabelle ohne Delta zu
+inkonsistenten Zwischenständen führen könnten.
+
+## 4. Ergänzendes lokales Multi-Node-Cluster (kind) für den Skalierungsnachweis
+
+**Standard:** Ein einziges Cluster für Entwicklung, Deployment und Nachweis.
+
+**Unsere Wahl:** Primärbetrieb auf der DHBW 4C-Cloud (k3s), ergänzt um ein
+lokales 3-Node-kind-Cluster mit identischem Helm-Chart für den Nachweis
+horizontaler Skalierung.
+
+**Begründung:** Das Cloud-Projekt ist ein von mehreren Kursgruppen gemeinsam
+genutztes Kontingent; zum Zeitpunkt der Umsetzung war das vCPU-Limit
+ausgeschöpft, wodurch auf der Cloud nur ein Single-Node-Betrieb möglich war.
+Statt den Skalierungsnachweis zu unterlassen, wurde dasselbe Helm-Chart
+zusätzlich auf einem lokalen Multi-Node-Cluster deployt und dort horizontal
+skaliert. Dies zeigt zugleich, dass die Manifeste plattformunabhängig und
+wirklich deklarativ sind – ein zusätzlicher Beleg für die Portabilität der
+Lösung, nicht nur ein Workaround.
+
+## Zusammenfassung für README Kapitel 4
+
+> Der Prototyp weicht bewusst an vier Stellen vom Vorlesungsstandard ab:
+> MinIO statt HDFS als Objektspeicher, k3s statt kubeadm als leichtgewichtige
+> Kubernetes-Distribution, Delta Lake statt reinem Parquet für ACID-Garantien
+> im Lakehouse, sowie ein ergänzendes lokales Multi-Node-Cluster zum Nachweis
+> horizontaler Skalierung bei begrenztem Cloud-Kontingent. Details siehe
+> `docs/architecture-decisions.md`.
