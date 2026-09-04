@@ -1,0 +1,81 @@
+# SCRUM-74 — Schema-Registry.
+#
+# Deployment, nicht StatefulSet: die Registry haelt keinen eigenen State, sie
+# speichert alle Schemata im Kafka-Topic _schemas. Jede Replik liest denselben
+# Log — deshalb ist sie beliebig horizontal skalierbar und braucht kein PVC.
+# Genau der Kontrast zu Kafka selbst, der im Bericht (Kapitel 8) den Punkt
+# "sinnvolle Workload-Typen" traegt.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: schema-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schema-registry
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: schema-registry
+          image: confluentinc/cp-schema-registry:7.6.1
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SCHEMA_REGISTRY_LISTENERS
+              value: "http://0.0.0.0:8081"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
+              value: "3"
+            # BACKWARD: ein neuer Consumer kann Daten lesen, die mit dem alten
+            # Schema geschrieben wurden. Neue Felder brauchen deshalb zwingend
+            # einen default — genau die Regel, an der das Schema-Evolution-
+            # Beispiel aus SCRUM-88 haengt.
+            - name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL
+              value: "BACKWARD"
+          readinessProbe:
+            httpGet:
+              path: /subjects
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  labels:
+    app.kubernetes.io/name: schema-registry
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: schema-registry
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

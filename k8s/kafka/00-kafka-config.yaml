@@ -1,0 +1,45 @@
+# SCRUM-73 — zentrale Kafka-Konfiguration.
+# Alles, was nicht pod-spezifisch ist, steht hier und nicht in der StatefulSet-Spec.
+# Zahlt auf SCRUM-81 (Config ueber ConfigMaps/Secrets) und auf das Kriterium
+# "Config ueber ConfigMap/Secret" im Bewertungsschema ein.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: nyc-congestion-watch
+data:
+  # KRaft-Cluster-ID. Muss ueber alle Broker identisch und ueber Neustarts stabil sein,
+  # sonst formatiert sich jeder Pod ein eigenes Cluster. Einmal erzeugt mit:
+  #   kafka-storage.sh random-uuid
+  CLUSTER_ID: "thb8_EyHRJC5PVX3ItzF8Q"
+
+  # KRaft: kein ZooKeeper. Jeder Pod ist gleichzeitig Broker und Controller
+  # (combined mode) — bei drei Knoten ist ein separates Controller-Quorum
+  # auf einem Studien-Cluster reine Pod-Verschwendung.
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "0@kafka-0.kafka-headless:9093,1@kafka-1.kafka-headless:9093,2@kafka-2.kafka-headless:9093"
+  KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+  KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+
+  # RF=3 / minISR=2: ein Broker darf ausfallen, ohne dass Schreiben blockiert.
+  # Voraussetzung fuer die Exactly-once-Semantik aus SCRUM-95 — Transaktionen
+  # brauchen einen replizierten transaction state log.
+  KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+  KAFKA_MIN_INSYNC_REPLICAS: "2"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+
+  # Topics werden explizit ueber den Job in 30-kafka-topics-job.yaml angelegt,
+  # damit Partitionszahl und Retention nachvollziehbar deklariert sind und nicht
+  # implizit beim ersten Produce entstehen (siehe docs/topics-und-partitionierung.md).
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+  # 7 Tage Retention: deckt ein Reprocessing ueber eine volle Woche ab, ohne dass
+  # der PVC auf dem Studien-Cluster volllaeuft. Historie liegt ohnehin im Lake.
+  KAFKA_LOG_RETENTION_HOURS: "168"
