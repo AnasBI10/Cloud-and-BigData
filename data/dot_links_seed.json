@@ -1,0 +1,627 @@
+[
+  {
+    "link_id": "4329472",
+    "borough": "Manhattan",
+    "link_name": "LINCOLN TUNNEL E SOUTH TUBE - NJ - NY"
+  },
+  {
+    "link_id": "4329473",
+    "borough": "Manhattan",
+    "link_name": "LINCOLN TUNNEL E CENTER TUBE NJ - NY"
+  },
+  {
+    "link_id": "4329499",
+    "borough": "Staten Island",
+    "link_name": "MLK N WALKER STREET - NJ ROUTE 169"
+  },
+  {
+    "link_id": "4329507",
+    "borough": "Manhattan",
+    "link_name": "LINCOLN TUNNEL W NORTH TUBE NY - NJ"
+  },
+  {
+    "link_id": "4329508",
+    "borough": "Manhattan",
+    "link_name": "LINCOLN TUNNEL W CENTER TUBE NY - NJ"
+  },
+  {
+    "link_id": "4362244",
+    "borough": "Queens",
+    "link_name": "CVE NB LIE - WILLETS PT BLVD"
+  },
+  {
+    "link_id": "4362249",
+    "borough": "Queens",
+    "link_name": "LIE WB LITTLE NECK PKWY - NB CIP"
+  },
+  {
+    "link_id": "4362250",
+    "borough": "Queens",
+    "link_name": "CVE NB GCP - WILLETS PT BLVD"
+  },
+  {
+    "link_id": "4362251",
+    "borough": "Queens",
+    "link_name": "LIE WB LITTLE NECK PKWY - NB CVE"
+  },
+  {
+    "link_id": "4362314",
+    "borough": "Queens",
+    "link_name": "TNB S Qns Anchorage - CIP S @ TNB"
+  },
+  {
+    "link_id": "4362342",
+    "borough": "Queens",
+    "link_name": "LIE E 84TH ST - 108TH ST"
+  },
+  {
+    "link_id": "4456450",
+    "borough": "Manhattan",
+    "link_name": "FDR N - TBB E 116TH STREET - MANHATTAN TRUSS"
+  },
+  {
+    "link_id": "4456452",
+    "borough": "Manhattan",
+    "link_name": "TBB W - FDR S MANHATTAN TRUSS - E116TH STREET"
+  },
+  {
+    "link_id": "4456476",
+    "borough": "Queens",
+    "link_name": "TBB N QUEENS ANCHORAGE - MANHATTAN LIFT SPAN"
+  },
+  {
+    "link_id": "4456477",
+    "borough": "Queens",
+    "link_name": "MDE S TBB EXIT RAMP - QUEENS ANCHORAGE"
+  },
+  {
+    "link_id": "4456478",
+    "borough": "Queens",
+    "link_name": "BE S TBB EXIT RAMP - QUEENS ANCHORAGE"
+  },
+  {
+    "link_id": "4456479",
+    "borough": "Queens",
+    "link_name": "BE S TBB EXIT RAMP - MANHATTAN LIFT SPAN"
+  },
+  {
+    "link_id": "4456481",
+    "borough": "Queens",
+    "link_name": "TBB S MANHATTAN LIFT SPAN - QUEENS ANCHORAGE"
+  },
+  {
+    "link_id": "4456483",
+    "borough": "Queens",
+    "link_name": "CIP N ramp to TNB - TNB Queens Anchorage"
+  },
+  {
+    "link_id": "4456494",
+    "borough": "Manhattan",
+    "link_name": "West St S Spring St - BBT Manhattan Portal outbound"
+  },
+  {
+    "link_id": "4456496",
+    "borough": "Bronx",
+    "link_name": "BWB S Toll Plaza - Queens Anchorage"
+  },
+  {
+    "link_id": "4456497",
+    "borough": "Queens",
+    "link_name": "BWB N Queens Anchorage - Toll Plaza"
+  },
+  {
+    "link_id": "4456498",
+    "borough": "Bronx",
+    "link_name": "HRP S Lafayette Ave - BWB S Toll Plaza"
+  },
+  {
+    "link_id": "4456500",
+    "borough": "Queens",
+    "link_name": "Whitestone Expwy N Exit 14 (Linden Pl) - BWB N Queens Anchorage"
+  },
+  {
+    "link_id": "4456501",
+    "borough": "Manhattan",
+    "link_name": "BBT W Toll Plaza - Manhattan Portal"
+  },
+  {
+    "link_id": "4456502",
+    "borough": "Manhattan",
+    "link_name": "BBT E Manhattan Portal - Toll Plaza"
+  },
+  {
+    "link_id": "4456505",
+    "borough": "Queens",
+    "link_name": "TNB N Queens Anchorage - Toll Plaza"
+  },
+  {
+    "link_id": "4456506",
+    "borough": "Queens",
+    "link_name": "TNB S Toll Plaza - Queens Anchorage"
+  },
+  {
+    "link_id": "4456510",
+    "borough": "Queens",
+    "link_name": "QMT W Toll Plaza - Manhattan Side"
+  },
+  {
+    "link_id": "4456511",
+    "borough": "Manhattan",
+    "link_name": "QMT E Manhattan Side - Toll Plaza"
+  },
+  {
+    "link_id": "4575278",
+    "borough": "Bronx",
+    "link_name": "MDE N VAN CORTLAND PARK - NYST N EXIT 1 (MP.48)"
+  },
+  {
+    "link_id": "4616192",
+    "borough": "Staten Island",
+    "link_name": "SIE E CLOVE ROAD - FINGERBOARD ROAD"
+  },
+  {
+    "link_id": "4616193",
+    "borough": "Staten Island",
+    "link_name": "SIE E BRADLEY AVENUE - CLOVE ROAD"
+  },
+  {
+    "link_id": "4616194",
+    "borough": "Staten Island",
+    "link_name": "SIE E WOOLEY AVENUE - BRADLEY AVENUE"
+  },
+  {
+    "link_id": "4616195",
+    "borough": "Staten Island",
+    "link_name": "SIE E RICHMOND AVENUE - WOOLEY AVENUE"
+  },
+  {
+    "link_id": "4616196",
+    "borough": "Staten Island",
+    "link_name": "MLK S - SIE E WALKER STREET - WOOLEY AVENUE"
+  },
+  {
+    "link_id": "4616197",
+    "borough": "Staten Island",
+    "link_name": "SIE E SOUTH AVENUE - RICHMOND AVENUE"
+  },
+  {
+    "link_id": "4616198",
+    "borough": "Staten Island",
+    "link_name": "WSE N-SIE E SOUTH AVENUE - SOUTH AVENUE"
+  },
+  {
+    "link_id": "4616199",
+    "borough": "Staten Island",
+    "link_name": "SIE W - WSE S SOUTH AVENUE - SOUTH AVENUE"
+  },
+  {
+    "link_id": "4616200",
+    "borough": "Staten Island",
+    "link_name": "WSE S SOUTH AVENUE - VICTORY BOULEVARD"
+  },
+  {
+    "link_id": "4616201",
+    "borough": "Staten Island",
+    "link_name": "WSE S VICTORY BOULEVARD - ARDEN AVENUE"
+  },
+  {
+    "link_id": "4616202",
+    "borough": "Staten Island",
+    "link_name": "WSE S ARDEN AVENUE - BLOOMINGDALE ROAD"
+  },
+  {
+    "link_id": "4616203",
+    "borough": "Staten Island",
+    "link_name": "WSE S BLLOMINGDALE ROAD - TYRELLAN AVENUE"
+  },
+  {
+    "link_id": "4616206",
+    "borough": "Staten Island",
+    "link_name": "SIE W FINGERBOARD ROAD - CLOVE ROAD"
+  },
+  {
+    "link_id": "4616208",
+    "borough": "Staten Island",
+    "link_name": "SIE W BRADLEY AVENUE - WOOLEY AVENUE"
+  },
+  {
+    "link_id": "4616209",
+    "borough": "Staten Island",
+    "link_name": "SIE W WOOLEY AVENUE - RICHMOND AVENUE"
+  },
+  {
+    "link_id": "4616210",
+    "borough": "Staten Island",
+    "link_name": "MLK S - SIE W WALKER STREET - RICHMOND AVENUE"
+  },
+  {
+    "link_id": "4616211",
+    "borough": "Staten Island",
+    "link_name": "SIE W RICHMOND AVENUE - SOUTH AVENUE"
+  },
+  {
+    "link_id": "4616212",
+    "borough": "Staten Island",
+    "link_name": "WSE N VICTORY BLVD - SOUTH AVENUE"
+  },
+  {
+    "link_id": "4616213",
+    "borough": "Staten Island",
+    "link_name": "WSE N ARDEN AVENUE - VICTORY BLVD"
+  },
+  {
+    "link_id": "4616214",
+    "borough": "Staten Island",
+    "link_name": "WSE N BLOOMUINGDALE ROAD - ARDEN AVENUE"
+  },
+  {
+    "link_id": "4616215",
+    "borough": "Staten Island",
+    "link_name": "WSE N TYRELLAN AVENUE - BLOOMINGDALE ROAD"
+  },
+  {
+    "link_id": "4616216",
+    "borough": "Staten Island",
+    "link_name": "SIE E-MLK N RICHMOND AVENUE - WALKER STREET"
+  },
+  {
+    "link_id": "4616217",
+    "borough": "Staten Island",
+    "link_name": "SIE W - MLK N WOOLEY AVENUE - WLAKER STREET"
+  },
+  {
+    "link_id": "4616220",
+    "borough": "Brooklyn",
+    "link_name": "GOW N 92ND STREET - 7TH AVENUE"
+  },
+  {
+    "link_id": "4616223",
+    "borough": "Brooklyn",
+    "link_name": "GOW N 9TH STREET - ATLANTIC AVENUE"
+  },
+  {
+    "link_id": "4616225",
+    "borough": "Queens",
+    "link_name": "TBB N QUEENS ANCHORAGE - BE N"
+  },
+  {
+    "link_id": "4616226",
+    "borough": "Brooklyn",
+    "link_name": "GOW S 7TH AVENUE - 92ND STREET"
+  },
+  {
+    "link_id": "4616228",
+    "borough": "Bronx",
+    "link_name": "I-87 NYST S Exit 1 - MDE S Van Cortlandt Park"
+  },
+  {
+    "link_id": "4616229",
+    "borough": "Brooklyn",
+    "link_name": "BQE S - GOW S ALTANTIC AVENUE - 9TH STREET"
+  },
+  {
+    "link_id": "4616239",
+    "borough": "Queens",
+    "link_name": "Whitestone Expwy S Exit 14 (Linden Pl) - VWE S MP8.65 (Exit 13 Northern Blvd)"
+  },
+  {
+    "link_id": "4616241",
+    "borough": "Queens",
+    "link_name": "VWE S MP8.65 (Exit 13 Northern Blvd) - MP6.39 (Exit 11 Jewel Ave)"
+  },
+  {
+    "link_id": "4616246",
+    "borough": "Bronx",
+    "link_name": "BE N STRATFORD AVENUE - CASTLE HILL AVE"
+  },
+  {
+    "link_id": "4616247",
+    "borough": "Bronx",
+    "link_name": "BE N Castle Hill Avenue - Griswold Ave"
+  },
+  {
+    "link_id": "4616250",
+    "borough": "Bronx",
+    "link_name": "HRP N LAFAYETTE AVENUE - E TREMONT AVENUE"
+  },
+  {
+    "link_id": "4616252",
+    "borough": "Bronx",
+    "link_name": "BRP N WATSON AVENUE - FORDHAM ROAD"
+  },
+  {
+    "link_id": "4616253",
+    "borough": "Bronx",
+    "link_name": "CBE E TAYLOR AVENUE - CASTLE HILL AVENUE"
+  },
+  {
+    "link_id": "4616255",
+    "borough": "Bronx",
+    "link_name": "MDE N RFK Bridge - 142nd St"
+  },
+  {
+    "link_id": "4616257",
+    "borough": "Brooklyn",
+    "link_name": "BQE N ATLANTIC AVENUE - LEONARD STREET"
+  },
+  {
+    "link_id": "4616259",
+    "borough": "Queens",
+    "link_name": "VWE S MP6.39 (Exit 11 Jewel Ave) - MP4.63 (Exit 6 Jamaica Ave)"
+  },
+  {
+    "link_id": "4616260",
+    "borough": "Bronx",
+    "link_name": "BE S CASTLE HILL AVENUE - STRATFORD AVENUE"
+  },
+  {
+    "link_id": "4616261",
+    "borough": "Bronx",
+    "link_name": "BE S Griswold - Castle Hill Avenue"
+  },
+  {
+    "link_id": "4616266",
+    "borough": "Bronx",
+    "link_name": "BRP S FORDHAM ROAD - WATSON AVENUE"
+  },
+  {
+    "link_id": "4616267",
+    "borough": "Bronx",
+    "link_name": "CBE W CASTLE HILL AVENUE - TAYLOR AVENUE"
+  },
+  {
+    "link_id": "4616271",
+    "borough": "Brooklyn",
+    "link_name": "BQE S LEONARD STREET - ATLANTIC AVENUE"
+  },
+  {
+    "link_id": "4616272",
+    "borough": "Queens",
+    "link_name": "VWE S MP4.63 (Exit 6 Jamaica Ave) - MP2.66 (Exit 2 Roackaway Blvd)"
+  },
+  {
+    "link_id": "4616276",
+    "borough": "Queens",
+    "link_name": "VWE S MP2.66 (Exit 2 Rockaway Blvd) - Belt Pkwy E 182nd St"
+  },
+  {
+    "link_id": "4616282",
+    "borough": "Staten Island",
+    "link_name": "ROUTE 169 S - MLK WALKER STREET"
+  },
+  {
+    "link_id": "4616297",
+    "borough": "Bronx",
+    "link_name": "CBE E CASTLE HILL AVE - BE N WATERBURY AVE"
+  },
+  {
+    "link_id": "4616298",
+    "borough": "Queens",
+    "link_name": "VWE N MP4.63 (Exit 6 - Jamaica Ave) - MP6.39 (Exit 11 Jewel Ave)"
+  },
+  {
+    "link_id": "4616299",
+    "borough": "Queens",
+    "link_name": "VWE N MP6.39 (Exit 11 Jewel Ave) - MP8.65 (Exit 13 Northern Blvd)"
+  },
+  {
+    "link_id": "4616300",
+    "borough": "Queens",
+    "link_name": "VWE N MP8.64 (Exit 13 Northern Blvd) - Whitestone Expwy Exit 14 (Linden Pl)"
+  },
+  {
+    "link_id": "4616305",
+    "borough": "Bronx",
+    "link_name": "BWB N Toll Plaza - HRP N Lafayatte Ave"
+  },
+  {
+    "link_id": "4616309",
+    "borough": "Bronx",
+    "link_name": "CBE E AMSTERDAM AVE(U/LVL) - MORRIS AVE"
+  },
+  {
+    "link_id": "4616310",
+    "borough": "Bronx",
+    "link_name": "CBE AMSTERDAM AVE (L/LVL) - MORRIS AVE"
+  },
+  {
+    "link_id": "4616312",
+    "borough": "Queens",
+    "link_name": "BWB S Queens Anchorage - WSE S Exit 14 (Linden Pl)"
+  },
+  {
+    "link_id": "4616318",
+    "borough": "Brooklyn",
+    "link_name": "GOW N 7TH AVENUE - 9TH STREET"
+  },
+  {
+    "link_id": "4616319",
+    "borough": "Brooklyn",
+    "link_name": "GOW S 9TH STREET - 7TH AVENUE"
+  },
+  {
+    "link_id": "4616320",
+    "borough": "Queens",
+    "link_name": "CIP N TNB - Whitestone Expwy S Exit 14 (Linden Pl)"
+  },
+  {
+    "link_id": "4616323",
+    "borough": "Manhattan",
+    "link_name": "12th Ave S 57th St - 45th St"
+  },
+  {
+    "link_id": "4616324",
+    "borough": "Manhattan",
+    "link_name": "12th ave @ 45th - 11 ave ganservoort st"
+  },
+  {
+    "link_id": "4616325",
+    "borough": "Manhattan",
+    "link_name": "11th ave s ganservoort - west st @ spring st"
+  },
+  {
+    "link_id": "4616328",
+    "borough": "Manhattan",
+    "link_name": "FDR N Catherine Slip - 25th St"
+  },
+  {
+    "link_id": "4616329",
+    "borough": "Manhattan",
+    "link_name": "FDR N 25th - 63rd St"
+  },
+  {
+    "link_id": "4616332",
+    "borough": "Manhattan",
+    "link_name": "FDR S 63rd - 25th St"
+  },
+  {
+    "link_id": "4616333",
+    "borough": "Manhattan",
+    "link_name": "FDR S 25th St - Catherine Slip"
+  },
+  {
+    "link_id": "4616337",
+    "borough": "Manhattan",
+    "link_name": "11th ave n ganservoort - 12th ave @ 40th st"
+  },
+  {
+    "link_id": "4616338",
+    "borough": "Manhattan",
+    "link_name": "12th Ave N 40th - 57th St"
+  },
+  {
+    "link_id": "4616339",
+    "borough": "Manhattan",
+    "link_name": "BQE N Atlantic Ave - BKN Bridge Manhattan Side"
+  },
+  {
+    "link_id": "4616340",
+    "borough": "Manhattan",
+    "link_name": "BQE N Atlantic Ave - MAN Bridge Manhattan Side"
+  },
+  {
+    "link_id": "4616341",
+    "borough": "Manhattan",
+    "link_name": "FDR S Catherine Slip - BKN Bridge Manhattan Side"
+  },
+  {
+    "link_id": "4616342",
+    "borough": "Manhattan",
+    "link_name": "BKN Bridge Manhattan Side - FDR N Catherine Slip"
+  },
+  {
+    "link_id": "4616346",
+    "borough": "Manhattan",
+    "link_name": "Westside Hwy S GWB - 57th St"
+  },
+  {
+    "link_id": "4616350",
+    "borough": "Queens",
+    "link_name": "CIP S LIE - Hempstead Tpk"
+  },
+  {
+    "link_id": "4616351",
+    "borough": "Queens",
+    "link_name": "CIP N Hempstead Tpk - LIE"
+  },
+  {
+    "link_id": "4616352",
+    "borough": "Queens",
+    "link_name": "CIP S Hempstead Tpk - Laurelton Pkwy @ SSP"
+  },
+  {
+    "link_id": "4616353",
+    "borough": "Queens",
+    "link_name": "Laurelton Pkwy N @ SSP - CIP N Hempstead Tpk"
+  },
+  {
+    "link_id": "4616354",
+    "borough": "Queens",
+    "link_name": "Laurelton Pkwy S @ SSP - Belt Pkwy W 182nd St"
+  },
+  {
+    "link_id": "4616355",
+    "borough": "Queens",
+    "link_name": "Belt Pkwy E 182nd St - Laurelton Pkwy N @ SSP"
+  },
+  {
+    "link_id": "4616356",
+    "borough": "Queens",
+    "link_name": "Belt Pkwy W 182nd St - JFK Expressway"
+  },
+  {
+    "link_id": "4616357",
+    "borough": "Queens",
+    "link_name": "Belt Pkwy W JFK Expressway - VWE N Jamaica Ave"
+  },
+  {
+    "link_id": "4616364",
+    "borough": "Queens",
+    "link_name": "LIE W 108TH ST - 84TH ST"
+  },
+  {
+    "link_id": "4620298",
+    "borough": "Manhattan",
+    "link_name": "GWB E LOWER LEVEL PLAZA - CBE E LOWER LEVEL AMSTERDAM AVE"
+  },
+  {
+    "link_id": "4620310",
+    "borough": "Bronx",
+    "link_name": "CBE W U/LEV AMSTERDAM AVE - I95 S EXP LNS"
+  },
+  {
+    "link_id": "4620314",
+    "borough": "Bronx",
+    "link_name": "MDE S HARLEM RIVER PARK - GWB W AMSTERDAM AVENUE UPPER LEVEL"
+  },
+  {
+    "link_id": "4620315",
+    "borough": "Bronx",
+    "link_name": "CBE W L/LE V AMSTERDAM AVE - I 95 S LOC LNS"
+  },
+  {
+    "link_id": "4620330",
+    "borough": "Bronx",
+    "link_name": "MDE S HARLEM RIVER PARK - GWB W AMSTERDAM AVENUE LOWER LEVEL"
+  },
+  {
+    "link_id": "4620331",
+    "borough": "Bronx",
+    "link_name": "CBE W MORRIS AVE - GWB W AMSTERDAM AVE (U/LVL)"
+  },
+  {
+    "link_id": "4620332",
+    "borough": "Bronx",
+    "link_name": "CBE W MORRIS AVE - GWB W AMSTERDAM AVE (L/LVL)"
+  },
+  {
+    "link_id": "4620343",
+    "borough": "Manhattan",
+    "link_name": "Westside Hwy N 57th St - GWB"
+  },
+  {
+    "link_id": "4763649",
+    "borough": "Brooklyn",
+    "link_name": "VNB W BROOKLYN GANTRY UPPER LEVEL - SI GANTRY UPPER LEVEL"
+  },
+  {
+    "link_id": "4763650",
+    "borough": "Staten Island",
+    "link_name": "SIE E VNB E FINGERBOARD ROAD - SI GANTRY LOWER LEVEL"
+  },
+  {
+    "link_id": "4763652",
+    "borough": "Brooklyn",
+    "link_name": "VNB E SI GANTRY UPPER LEVEL - BROOKLYN GANTRY UPPER LEVEL"
+  },
+  {
+    "link_id": "4763655",
+    "borough": "Brooklyn",
+    "link_name": "GOW S VNB W 92ND STREET - BKLYN GANTRY UPPER LEVEL"
+  },
+  {
+    "link_id": "4763657",
+    "borough": "Brooklyn",
+    "link_name": "GOW S VNB W 92ND STREET - BKLYN GANTRY LOWER LEVEL"
+  }
+]

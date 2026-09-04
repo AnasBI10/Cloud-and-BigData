@@ -1,0 +1,143 @@
+# SCRUM-75 — beide Producer-Modi als getrennte Deployments aus einem Image.
+#
+# Gemeinsame Betriebsparameter in einer ConfigMap, modusspezifische als env
+# im jeweiligen Deployment. Das Socrata-Token liegt im Secret, nie im Manifest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestion-config
+  labels:
+    app.kubernetes.io/part-of: nyc-congestion-watch
+data:
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+  TOPIC: "traffic.speeds.raw"
+  DLQ_TOPIC: "traffic.speeds.dlq"
+  LOG_LEVEL: "INFO"
+---
+# Das Socrata-Token wird bewusst NICHT als Manifest eingecheckt, damit ein
+# kubectl apply es nicht ueberschreibt. Vor dem ersten Deploy anlegen
+# (Teil der Deploy-Anleitung, SCRUM-97):
+#   kubectl create secret generic socrata-credentials \
+#     --from-literal=app-token='<TOKEN>'
+# Ohne Token laeuft der Live-Poller anonym mit strengerem Rate-Limit.
+---
+# Lastgenerator. Skaliert frei nach oben: mehr Repliken = mehr Events/s,
+# das ist genau der Nachweis fuer SCRUM-93. Keine Koordination noetig, weil
+# synthetische Events sich nicht duplizieren koennen.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-synthetic
+  labels:
+    app.kubernetes.io/name: producer-synthetic
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: producer-synthetic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: producer-synthetic
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: producer
+          image: congestion-watch/ingestion:0.1.1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: ingestion-config
+          env:
+            - name: MODE
+              value: "synthetic"
+            - name: EVENTS_PER_SECOND
+              value: "20"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+# Live-Poller. replicas MUSS mit SHARD_COUNT uebereinstimmen, sonst zieht
+# entweder ein Shard nichts oder Boroughs werden gar nicht abgefragt.
+# Deshalb hier bewusst KEIN HPA — die Replikazahl ist an eine fachliche
+# Aufteilung gebunden und darf nicht last-getrieben schwanken.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-live
+  labels:
+    app.kubernetes.io/name: producer-live
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: producer-live
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: producer-live
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: producer
+          image: congestion-watch/ingestion:0.1.1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: ingestion-config
+          env:
+            - name: MODE
+              value: "live"
+            # 5 Minuten, abgestimmt auf die gemessene Meldefrequenz von
+            # ~7,7 Min. je Sensor (DATA_SOURCES.md). Kuerzer waere wegen der
+            # Cache-Staleness des Endpunkts wirkungslos.
+            - name: POLL_INTERVAL_S
+              value: "300"
+            # Startfenster des ersten Laufs. Am 04.09.2026 gemessen: der Feed
+            # stand 13 Stunden still. Mit einem engen Startfenster haette der
+            # Poller dauerhaft leer gedreht.
+            - name: INITIAL_LOOKBACK_H
+              value: "24"
+            - name: SHARD_INDEX
+              value: "0"
+            - name: SHARD_COUNT
+              value: "1"
+            - name: SOCRATA_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: socrata-credentials
+                  key: app-token
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "192Mi"
+            limits:
+              cpu: "500m"
+              memory: "384Mi"
+---
+# Autoskalierung nur fuer den Lastgenerator (SCRUM-94).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: producer-synthetic
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: producer-synthetic
+  minReplicas: 1
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
