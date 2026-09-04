@@ -112,6 +112,16 @@ def shard_of(seed: list[dict], settings: Settings) -> list[dict]:
     """
     if settings.shard_count <= 1:
         return seed
+    if not 0 <= settings.shard_index < settings.shard_count:
+        # Waere die Konfiguration inkonsistent (etwa mehr Repliken als
+        # SHARD_COUNT), zoege dieser Pod stillschweigend gar nichts oder
+        # dasselbe wie ein anderer. Lieber laut abbrechen als leise
+        # Duplikate oder Luecken erzeugen.
+        raise SystemExit(
+            f"SHARD_INDEX={settings.shard_index} liegt ausserhalb von "
+            f"SHARD_COUNT={settings.shard_count} — replicas und SHARD_COUNT "
+            f"muessen uebereinstimmen"
+        )
     boroughs = sorted({s["borough"] for s in seed if s.get("borough")})
     mine = {
         b for i, b in enumerate(boroughs) if i % settings.shard_count == settings.shard_index

@@ -45,7 +45,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: producer
-          image: congestion-watch/ingestion:0.1.1
+          image: congestion-watch/ingestion:0.1.2
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -63,19 +63,48 @@ spec:
               cpu: "500m"
               memory: "256Mi"
 ---
-# Live-Poller. replicas MUSS mit SHARD_COUNT uebereinstimmen, sonst zieht
-# entweder ein Shard nichts oder Boroughs werden gar nicht abgefragt.
-# Deshalb hier bewusst KEIN HPA — die Replikazahl ist an eine fachliche
-# Aufteilung gebunden und darf nicht last-getrieben schwanken.
+# Live-Poller als StatefulSet, NICHT als Deployment.
+#
+# Grund: jede Replik muss wissen, welcher Ausschnitt ihrer ist. Ein Deployment
+# gibt allen Repliken dieselbe Env-Variable und vergibt Pod-Namen mit
+# Zufalls-Suffix — beim Test mit zwei Repliken zogen daraufhin beide Pods
+# dieselben drei Boroughs, waehrend Brooklyn und Queens gar nicht mehr
+# abgefragt wurden. Ein StatefulSet vergibt stabile Ordinale
+# (producer-live-0, -1, ...), aus denen der Pod seinen Shard-Index ableitet.
+#
+# replicas MUSS mit SHARD_COUNT uebereinstimmen, sonst bleibt ein Teil der
+# Boroughs unabgefragt. Deshalb bewusst KEIN HPA: die Replikazahl ist an eine
+# fachliche Aufteilung gebunden und darf nicht last-getrieben schwanken.
+# Maximum ist 5 (ein Shard je Borough).
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-live-headless
+  labels:
+    app.kubernetes.io/name: producer-live
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: producer-live
+  # Der Poller nimmt keine Verbindungen an; der Service existiert nur, weil ein
+  # StatefulSet einen serviceName braucht, um stabile Hostnamen zu vergeben.
+  ports:
+    - name: none
+      port: 9999
+---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: producer-live
   labels:
     app.kubernetes.io/name: producer-live
     app.kubernetes.io/part-of: nyc-congestion-watch
 spec:
+  serviceName: producer-live-headless
   replicas: 1
+  # Die Shards sind voneinander unabhaengig — kein Grund, sie nacheinander
+  # hochzufahren.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app.kubernetes.io/name: producer-live
@@ -87,7 +116,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: producer
-          image: congestion-watch/ingestion:0.1.1
+          image: congestion-watch/ingestion:0.1.2
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -105,8 +134,9 @@ spec:
             # Poller dauerhaft leer gedreht.
             - name: INITIAL_LOOKBACK_H
               value: "24"
-            - name: SHARD_INDEX
-              value: "0"
+            # SHARD_INDEX wird bewusst NICHT gesetzt: der Pod leitet ihn aus
+            # dem Ordinal seines Hostnamens ab (producer-live-2 -> 2). Als
+            # feste Env-Variable haetten alle Repliken denselben Index.
             - name: SHARD_COUNT
               value: "1"
             - name: SOCRATA_APP_TOKEN
