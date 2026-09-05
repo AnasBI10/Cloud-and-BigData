@@ -1,0 +1,9 @@
+# Serving-API (SCRUM-79)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Delta Lake ohne Spark: delta-rs liest das Transaktionslog nativ. Der
+# API-Pod braucht damit keine JVM und keinen Executor, nur einen Reader.
+deltalake==0.24.0
+pyarrow==18.1.0
