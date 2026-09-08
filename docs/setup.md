@@ -102,3 +102,5 @@ StatefulSet mit lokalem PVC (local-path, 5Gi), Service ClusterIP 10.43.234.121, 
 Ubuntu Server 24.04 LTS | k3s v1.36.4+k3s1 | m1.extra_large (4 vCPU) |
 StorageClass local-path | OpenStack, DHBW 4C-Cloud
 EOF
+## Kafka + Schema-Registry (Story 7, 8)
+ 3-Broker-StatefulSet (KRaft-Mode), Topics traffic.speeds.raw (12 Partitionen), weather.observations.raw (5), traffic.speeds.dlq (3), Replikationsfaktor 3. Schema-Registry mit registriertem Avro-Schema fuer traffic.speeds.raw-value. Hinweis: Job-Manifeste (kafka-topics-init, schema-register) benoetigten nachtraeglich resources.requests, da die ResourceQuota im Namespace bigdata sonst die Pod-Erstellung verweigert (siehe Abschnitt 5).
