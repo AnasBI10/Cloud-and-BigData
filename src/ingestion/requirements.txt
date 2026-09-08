@@ -1,0 +1,5 @@
+# Abhaengigkeiten nur fuer das Producer-Image, bewusst getrennt von der
+# Wurzel-requirements.txt: die enthaelt auch FastAPI, boto3 und pyarrow, die
+# im Producer nichts zu suchen haben. Kleineres Image, kleinere Angriffsflaeche.
+confluent-kafka[avro,schemaregistry]==2.6.1
+requests==2.34.2

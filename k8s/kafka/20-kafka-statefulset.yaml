@@ -1,0 +1,107 @@
+# SCRUM-73 — Kafka als StatefulSet mit PVC.
+#
+# Warum StatefulSet und nicht Deployment: jeder Broker haelt einen eigenen,
+# nicht austauschbaren Datenbestand (seine Partitionsreplikate) und braucht eine
+# stabile Identitaet, weil die Broker-ID im KRaft-Quorum und in den advertised
+# listeners fest verdrahtet ist. Ein Deployment vergibt zufaellige Pod-Namen und
+# teilt sich ein Volume — beides ist fuer Kafka falsch.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  # Parallel statt OrderedReady: beim Cold Start warten alle drei Broker
+  # aufeinander, um das Controller-Quorum zu bilden. Sequenzielles Hochfahren
+  # laeuft dabei in einen Deadlock, weil kafka-0 nie ready wird, solange
+  # kafka-1 und kafka-2 fehlen.
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+    spec:
+      terminationGracePeriodSeconds: 60
+      # Broker auf verschiedene Nodes verteilen, damit RF=3 auch physisch
+      # drei Ausfalldomaenen bedeutet. soft, damit es auf einem
+      # Single-Node-Cluster (kind/minikube) trotzdem startet.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kafka
+      containers:
+        - name: kafka
+          image: apache/kafka:3.9.0
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          # Node-ID und advertised listener sind die einzigen beiden Werte, die
+          # sich pro Pod unterscheiden. Beide werden aus dem Hostnamen abgeleitet
+          # (kafka-2 -> NODE_ID 2), alles andere kommt aus der ConfigMap.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              ORDINAL="${HOSTNAME##*-}"
+              export KAFKA_NODE_ID="${ORDINAL}"
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${HOSTNAME}.kafka-headless.${POD_NAMESPACE}.svc.cluster.local:9092"
+              echo "starting broker ${KAFKA_NODE_ID} as ${KAFKA_ADVERTISED_LISTENERS}"
+              exec /etc/kafka/docker/run
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          envFrom:
+            - configMapRef:
+                name: kafka-config
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+          # startupProbe gibt dem Quorum Zeit (bis 5 min), danach uebernimmt
+          # liveness mit engem Intervall. Ohne startupProbe killt liveness den
+          # Broker mitten in der Quorum-Bildung.
+          startupProbe:
+            tcpSocket:
+              port: broker
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: broker
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: broker
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "1Gi"
+            limits:
+              memory: "2Gi"
+  # Jeder Broker bekommt sein eigenes PVC. Beim Rescheduling auf einen anderen
+  # Node haengt sich kafka-1 wieder an genau sein Volume — deshalb ueberlebt der
+  # Log ueber Pod-Neustarts hinweg.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

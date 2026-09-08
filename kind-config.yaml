@@ -1,0 +1,47 @@
+# kind-Cluster fuer NYC Congestion Watch
+#
+# Rekonstruiert am 04.09.2026 aus dem laufenden Cluster (SCRUM-70 hatte die
+# Konfiguration nicht eingecheckt). Entspricht dem Stand, auf dem die
+# Manifeste verifiziert wurden: Kubernetes v1.36.1, ein Control-Plane-Node,
+# drei Worker.
+#
+#   kind create cluster --name ccbd --config kind-config.yaml
+#
+# Drei Worker sind kein Zufall: Kafka laeuft mit Replikationsfaktor 3 und
+# verteilt seine Broker per Anti-Affinity. Auf weniger Nodes startet es zwar,
+# aber RF=3 bedeutet dann keine drei echten Ausfalldomaenen mehr.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ccbd
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
+
+# Offener Punkt fuer SCRUM-91 (UI via Service/Ingress exponieren):
+#
+# Das aktuelle Cluster hat KEINE extraPortMappings. Der API-Server-Port wird
+# von kind zufaellig vergeben, sonst ist nichts nach aussen gemappt. Die UI
+# ist damit nur ueber `kubectl port-forward` erreichbar, nicht ueber einen
+# Ingress auf localhost.
+#
+# Soll die UI ueber einen Ingress-Controller laufen, muss das Cluster mit
+# folgender Ergaenzung NEU angelegt werden — nachtraeglich lassen sich
+# Portmappings nicht hinzufuegen:
+#
+# nodes:
+#   - role: control-plane
+#     kubeadmConfigPatches:
+#       - |
+#         kind: InitConfiguration
+#         nodeRegistration:
+#           kubeletExtraArgs:
+#             node-labels: "ingress-ready=true"
+#     extraPortMappings:
+#       - containerPort: 80
+#         hostPort: 80
+#         protocol: TCP
+#       - containerPort: 443
+#         hostPort: 443
+#         protocol: TCP

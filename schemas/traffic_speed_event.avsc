@@ -1,0 +1,73 @@
+{
+  "type": "record",
+  "name": "TrafficSpeedEvent",
+  "namespace": "nyc.congestionwatch.ingest.v1",
+  "doc": "Eine Geschwindigkeitsmessung eines DOT-Strassensegments. Subject: traffic.speeds.raw-value. Quelle: NYC DOT Traffic Speeds NBE (i4gi-tjb9).",
+  "fields": [
+    {
+      "name": "link_id",
+      "type": "string",
+      "doc": "Segment-ID des DOT-Feeds. Gleichzeitig der Kafka-Message-Key: garantiert, dass alle Messungen eines Segments in dieselbe Partition und damit in die richtige Reihenfolge fallen."
+    },
+    {
+      "name": "data_as_of",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Messzeitpunkt laut Sensor, NICHT Abrufzeit. Event Time fuer Windowing und Watermarks in SCRUM-82/85. Wegen der beobachteten Cache-Staleness des SODA2-Endpunkts kann dieser Wert Stunden hinter der Abrufzeit liegen."
+    },
+    {
+      "name": "event_key",
+      "type": "string",
+      "doc": "link_id + '|' + data_as_of als ISO-8601. Der DOT-Feed hat keine eindeutige Record-ID (das Feld id ist redundant zu link_id), deshalb ist dies der einzige verlaessliche Identifier. Merge-Key fuer den Delta-Sink und Grundlage der Exactly-once-Semantik in SCRUM-95."
+    },
+    {
+      "name": "status",
+      "type": "int",
+      "doc": "Sensorstatus. 0 = gueltige Messung. -101 ist ein Sentinel-Wert und tritt praktisch immer zusammen mit speed_mph=0 auf; rund die Haelfte aller Rohmeldungen traegt ihn. Wird bewusst mitgeschrieben statt beim Ingest verworfen, damit die Filterregel an genau einer Stelle liegt (Kappa, siehe Bericht 3.1) und die Bronze-Schicht den Rohstand behaelt."
+    },
+    {
+      "name": "speed_mph",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Gemessene Durchschnittsgeschwindigkeit in mph. null bei fehlendem Wert; bei status != 0 inhaltlich bedeutungslos."
+    },
+    {
+      "name": "travel_time_s",
+      "type": ["null", "int"],
+      "default": null,
+      "doc": "Fahrzeit ueber das Segment in Sekunden."
+    },
+    {
+      "name": "borough",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Stadtbezirk. Join-Schluessel gegen den Wetterstrom, der nur je Borough aufgeloest ist (SCRUM-84)."
+    },
+    {
+      "name": "link_name",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Klartextbeschreibung des Segments, nur fuer die Anzeige im Dashboard."
+    },
+    {
+      "name": "link_points",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Polylinie der Segmentgeometrie, wie vom DOT geliefert. Erspart eine separate Geometriequelle fuer die Karte in SCRUM-90. Wird nicht geparst, nur durchgereicht."
+    },
+    {
+      "name": "ingested_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Processing Time, gesetzt vom Producer. Differenz zu data_as_of macht die Cache-Staleness des Feeds messbar und liefert die Ende-zu-Ende-Latenz fuer Kapitel 2."
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "enum",
+        "name": "EventSource",
+        "symbols": ["DOT_LIVE", "SYNTHETIC", "REPLAY"]
+      },
+      "default": "SYNTHETIC",
+      "doc": "Herkunft des Events. Trennt echte Feed-Daten vom Lastgenerator fuer den Skalierungsnachweis und von Reprocessing-Laeufen aus dem Lake, ohne dass dafuer eigene Topics noetig sind."
+    }
+  ]
+}

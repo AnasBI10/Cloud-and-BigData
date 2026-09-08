@@ -1,0 +1,68 @@
+# SCRUM-74 — Schema versioniert registrieren.
+#
+# Das Schema wird nicht beim ersten Produce "irgendwie" registriert, sondern
+# deklarativ ueber einen Job. Damit ist die Schema-Version Teil des Deployments
+# und nicht ein Nebeneffekt davon, wer zufaellig zuerst gestartet ist.
+#
+# Die ConfigMap wird im Helm-Chart aus schemas/traffic_speed_event.avsc erzeugt:
+#   {{ (.Files.Glob "schemas/*.avsc").AsConfig | indent 2 }}
+# Beim rohen kubectl-Weg stattdessen:
+#   kubectl create configmap avro-schemas --from-file=schemas/traffic_speed_event.avsc
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schema-register
+  labels:
+    app.kubernetes.io/name: schema-registry
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: curlimages/curl:8.8.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              SR="http://schema-registry:8081"
+              SUBJECT="traffic.speeds.raw-value"
+
+              echo "warte auf Schema-Registry..."
+              until curl -sf "$SR/subjects" >/dev/null; do sleep 5; done
+
+              # Avro-JSON muss als String im Feld "schema" stehen, nicht als Objekt.
+              # sed statt jq, damit das Image schlank bleibt: Zeilenumbrueche raus,
+              # Anfuehrungszeichen escapen.
+              PAYLOAD=$(awk '{printf "%s", $0}' /schemas/traffic_speed_event.avsc \
+                | sed 's/"/\\"/g')
+
+              # Kompatibilitaet gegen die bereits registrierte Version pruefen,
+              # BEVOR registriert wird. Faellt das durch, bricht der Deploy ab —
+              # statt dass irgendwann ein Consumer im Betrieb stirbt.
+              CHECK=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                --data "{\"schema\": \"$PAYLOAD\"}" \
+                "$SR/compatibility/subjects/$SUBJECT/versions/latest?verbose=true")
+
+              if [ "$CHECK" != "404" ] && [ "$CHECK" != "200" ]; then
+                echo "Kompatibilitaetspruefung fehlgeschlagen (HTTP $CHECK)"
+                exit 1
+              fi
+
+              curl -sf -X POST \
+                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                --data "{\"schema\": \"$PAYLOAD\"}" \
+                "$SR/subjects/$SUBJECT/versions"
+
+              echo ""
+              echo "--- registrierte Versionen fuer $SUBJECT ---"
+              curl -sf "$SR/subjects/$SUBJECT/versions"
+          volumeMounts:
+            - name: schemas
+              mountPath: /schemas
+      volumes:
+        - name: schemas
+          configMap:
+            name: avro-schemas
