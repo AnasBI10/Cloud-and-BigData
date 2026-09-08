@@ -1,11 +1,3 @@
-# SCRUM-76 — Topics deklarativ anlegen statt per auto.create.
-#
-# Auto-Create wuerde jedes Topic mit den Broker-Defaults erzeugen. Damit waere die
-# Partitionszahl ein Zufallsprodukt und die Skalierungsgrenze der Consumer haette
-# keine Begruendung. Der Job legt sie explizit an; Begruendung der Zahlen steht in
-# docs/topics-und-partitionierung.md.
-#
-# idempotent: --if-not-exists, der Job kann bei jedem helm upgrade mitlaufen.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -53,3 +45,10 @@ spec:
 
               echo "--- angelegte Topics ---"
               /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --describe
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "250m"
+              memory: "512Mi"
