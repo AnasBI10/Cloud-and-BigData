@@ -104,3 +104,8 @@ StorageClass local-path | OpenStack, DHBW 4C-Cloud
 EOF
 ## Kafka + Schema-Registry (Story 7, 8)
  3-Broker-StatefulSet (KRaft-Mode), Topics traffic.speeds.raw (12 Partitionen), weather.observations.raw (5), traffic.speeds.dlq (3), Replikationsfaktor 3. Schema-Registry mit registriertem Avro-Schema fuer traffic.speeds.raw-value. Hinweis: Job-Manifeste (kafka-topics-init, schema-register) benoetigten nachtraeglich resources.requests, da die ResourceQuota im Namespace bigdata sonst die Pod-Erstellung verweigert (siehe Abschnitt 5).
+
+
+## Bekannter Vorfall: Diskdruck durch Kafka-PVC-Größe
+
+Die urspruengliche Kafka-PVC-Groesse (10Gi x 3 Broker = 30Gi) ueberstieg die verfuegbare Instanz-Disk (10GB gesamt). Ein Docker-Build hat kurzzeitig zusaetzlichen temporaeren Speicher belegt und dadurch Kubelet DiskPressure ausgeloest, was zur Eviction von Kafka, Schema-Registry und weiteren Pods fuehrte. Behoben durch Reduktion der PVC-Groesse auf 1Gi je Broker, passend zur begrenzten Cloud-Instanzgroesse, sowie Neustart von k3s zur Ruecksetzung der Diskdruck-Bewertung.
