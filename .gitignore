@@ -6,3 +6,23 @@ venv/
 env/
 __pycache__/
 *.pyc
+# Terraform State (enthält IPs, IDs, teils sensible Werte)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Lokale Provider-Binärdateien (nur lokal nötig, unnötig groß fürs Repo)
+.terraform/
+
+# Terraform-Variablen mit ggf. sensiblen Werten
+*.tfvars
+*.tfvars.json
+
+# Generiertes Ansible-Inventory (enthält IP-Adressen eurer VMs)
+generated-inventory.yml
+
+# SSH-Keys und OpenStack-Credentials (NIEMALS committen!)
+*.pem
+clouds.yaml
+.terraform.lock.hcl
+Cloud Computing und Big Data - Prüfungsleistung 2026 (1).pdf
