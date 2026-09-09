@@ -118,3 +118,6 @@ das Cluster komplett neu aufgesetzt - diesmal als echtes 3-Node-Setup
 Schema-Registry, Producer, Serving-API) wurden erfolgreich redeployt und
 verifiziert. Die groessere Instanzgroesse verhinderte die zuvor
 aufgetretenen Diskdruck-Probleme vollstaendig.
+## Helm-Chart (Story 80, 81)
+
+Alle Komponenten in ein Helm-Chart (deploy/helm/congestion-watch) konsolidiert, ersetzt die vorherigen einzelnen kubectl-apply-Manifeste. Zentrale Konfiguration in values.yaml. Deploy mit: helm install congestion-watch ./congestion-watch -n bigdata \ --set minio.password=<PW> --set socrata.appToken=<TOKEN> Beim Umstieg auf Helm aufgetretene und behobene Fehler: - KAFKA_CONTROLLER_QUORUM_VOTERS brauchte den vollqualifizierten DNS-Namen (...svc.cluster.local), sonst UnknownHostException im Raft-Quorum - Headless-Service brauchte publishNotReadyAddresses: true, da Kafka-Broker sich gegenseitig per DNS finden muessen, bevor sie "Ready" werden (Henne-Ei-Problem) - retentionMs-Werte in values.yaml mussten als String (Anfuehrungszeichen) angegeben werden, sonst interpretiert YAML sie als Fliesskommazahl - Schema-Registry brauchte SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR=3, sonst Konflikt mit dem Kafka-Cluster (min.insync.replicas=2) - Health-Probes zeigten auf /healthz, tatsaechliche Endpunkte der Serving-API sind /health und /ready
