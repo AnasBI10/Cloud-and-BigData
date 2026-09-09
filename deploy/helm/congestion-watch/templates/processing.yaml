@@ -33,14 +33,20 @@ spec:
           env:
             - name: KAFKA_BOOTSTRAP
               value: "kafka:9092"
-            - name: KAFKA_TOPIC
+            - name: KAFKA_TOPIC_IN
               value: "traffic.speeds.raw"
+            - name: KAFKA_TOPIC_DLQ
+              value: "traffic.speeds.dlq"
             - name: SCHEMA_PATH
               value: "/opt/spark-app/schemas/traffic_speed_event.avsc"
             - name: CHECKPOINT_DIR
               value: "/checkpoints"
             - name: MINIO_ENDPOINT
               value: "http://minio:9000"
+            - name: BRONZE_TABLE_PATH
+              value: "s3a://bronze/traffic_speeds_raw"
+            - name: SILVER_TABLE_PATH
+              value: "s3a://bronze/traffic_speeds_valid"
             - name: GOLD_TABLE_PATH
               value: "s3a://gold/congestion_scores"
           envFrom:
