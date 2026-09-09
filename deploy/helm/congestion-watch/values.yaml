@@ -75,3 +75,10 @@ serving:
   ingress:
     enabled: true
     host: ""
+
+processing:
+  image: congestion-watch/processing:0.1.0
+  checkpointStorage: 1Gi
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: 1, memory: 2Gi }
