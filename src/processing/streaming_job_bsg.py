@@ -4,13 +4,14 @@ from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.avro.functions import from_avro, to_avro
 from pyspark.sql.functions import (
-    avg, col, count, current_timestamp, expr, lit, struct, when, window,
+    avg, broadcast, coalesce, col, count, current_timestamp, expr, lit, struct, when, window,
 )
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 KAFKA_TOPIC_IN = os.environ.get("KAFKA_TOPIC_IN", "traffic.speeds.raw")
 KAFKA_TOPIC_DLQ = os.environ.get("KAFKA_TOPIC_DLQ", "traffic.speeds.dlq")
 SCHEMA_PATH = os.environ.get("SCHEMA_PATH", "/opt/spark-app/schemas/traffic_speed_event.avsc")
+SEED_PATH = os.environ.get("SEED_PATH", "/opt/spark-app/data/dot_links_seed.json")
 CHECKPOINT_BASE = os.environ.get("CHECKPOINT_DIR", "/opt/spark-app/checkpoints")
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
@@ -30,6 +31,27 @@ CONFLUENT_WIRE_HEADER_BYTES = 5
 def read_avro_schema(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def load_seed(spark: SparkSession) -> DataFrame:
+    return (
+        spark.read.option("multiline", "true").json(SEED_PATH)
+        .select(
+            col("link_id"),
+            col("borough").alias("seed_borough"),
+            col("link_name").alias("seed_link_name"),
+        )
+    )
+
+
+def enrich_with_seed(events: DataFrame, seed: DataFrame) -> DataFrame:
+    return (
+        events
+        .join(broadcast(seed), on="link_id", how="left")
+        .withColumn("borough", coalesce(col("seed_borough"), col("borough")))
+        .withColumn("link_name", coalesce(col("seed_link_name"), col("link_name")))
+        .drop("seed_borough", "seed_link_name")
+    )
 
 
 def build_spark() -> SparkSession:
@@ -140,8 +162,11 @@ def main() -> None:
         .withColumnRenamed("data_as_of", "event_time")
     )
 
+    seed = load_seed(spark)
+    enriched = enrich_with_seed(decoded, seed)
+
     late_cutoff = expr(f"current_timestamp() - interval {WATERMARK_DELAY}")
-    tagged = decoded.withColumn("is_late", col("event_time") < late_cutoff)
+    tagged = enriched.withColumn("is_late", col("event_time") < late_cutoff)
 
     windowed = (
         tagged

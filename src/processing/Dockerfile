@@ -5,6 +5,7 @@ WORKDIR /opt/spark-app
 
 COPY src/processing/streaming_job_bsg.py ./streaming_job_bsg.py
 COPY schemas/traffic_speed_event.avsc ./schemas/traffic_speed_event.avsc
+COPY data/dot_links_seed.json ./data/dot_links_seed.json
 
 RUN mkdir -p /opt/spark-app/checkpoints /opt/spark-app/ivy-cache && \
     chown -R 185:185 /opt/spark-app
