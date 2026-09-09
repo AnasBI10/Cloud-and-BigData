@@ -111,10 +111,4 @@ EOF
 Die urspruengliche Kafka-PVC-Groesse (10Gi x 3 Broker = 30Gi) ueberstieg die verfuegbare Instanz-Disk (10GB gesamt). Ein Docker-Build hat kurzzeitig zusaetzlichen temporaeren Speicher belegt und dadurch Kubelet DiskPressure ausgeloest, was zur Eviction von Kafka, Schema-Registry und weiteren Pods fuehrte. Behoben durch Reduktion der PVC-Groesse auf 1Gi je Broker, passend zur begrenzten Cloud-Instanzgroesse, sowie Neustart von k3s zur Ruecksetzung der Diskdruck-Bewertung.
 
 ## Cluster-Neuaufbau (08.09.2026)
-Nach einem Netzwerk-Vorfall auf der ursprünglichen Single-Node-Instanz
-(Interface-Konfiguration ging bei einer Netzwerk-Migration verloren) wurde
-das Cluster komplett neu aufgesetzt - diesmal als echtes 3-Node-Setup
-(Master 80GB, 2 Worker je 50GB Disk). Alle Komponenten (Kafka, MinIO,
-Schema-Registry, Producer, Serving-API) wurden erfolgreich redeployt und
-verifiziert. Die groessere Instanzgroesse verhinderte die zuvor
-aufgetretenen Diskdruck-Probleme vollstaendig.
+
