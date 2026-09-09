@@ -168,11 +168,16 @@ def main() -> None:
     late_cutoff = expr(f"current_timestamp() - interval {WATERMARK_DELAY}")
     tagged = enriched.withColumn("is_late", col("event_time") < late_cutoff)
 
+
+
+    window_col = window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE)
     windowed = (
         tagged
         .withWatermark("event_time", WATERMARK_DELAY)
-        .withColumn("window_start", window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE).getField("start"))
-        .withColumn("window_end", window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE).getField("end"))
+        .withColumn("window", window_col)
+        .withColumn("window_start", col("window.start"))
+        .withColumn("window_end", col("window.end"))
+        .drop("window")
         .withColumnRenamed("is_late", "is_late_marker")
     )
 
