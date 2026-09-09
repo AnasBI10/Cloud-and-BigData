@@ -34,3 +34,33 @@ garantierter Reihenfolge ankommen. Fuer die Windowed Aggregation im
 Processing-Job ist das Voraussetzung: ohne Ordnungsgarantie pro Segment
 waeren zeitliche Aggregationen pro link_id nicht deterministisch
 nachvollziehbar.
+## Workload-Typ-Zuordnung
+| Komponente | Workload-Typ | Begründung |
+4
+|---|---|---|
+5
+| Kafka | StatefulSet | Jeder Broker hält einen eigenen, nicht austauschbaren Datenbestand (Partitionsreplikate) und braucht stabile Identität (Broker-ID im KRaft-Quorum, advertised listener) |
+6
+| MinIO | StatefulSet | Objektdaten persistent, stabiler DNS-Name als S3-Endpoint für alle Consumer |
+7
+| Schema-Registry | Deployment | Zustandslos gegenüber Kubernetes — der eigentliche State liegt im Kafka-Topic `_schemas`, jede Replik liest denselben Log |
+8
+| Producer (synthetic) | Deployment | Zustandslos, beliebig horizontal skalierbar, daher mit HPA gekoppelt |
+9
+| Producer (live) | StatefulSet | Stabile Identität für zukünftige Erweiterung um Offset-Tracking je Instanz |
+10
+| Processing (Spark) | Deployment | Checkpoint liegt extern auf PVC, der Pod selbst ist austauschbar |
+11
+| Serving-API | Deployment | Zustandslos, liest nur aus MinIO/Kafka, mehrere Replicas hinter einem Service |
+
+## Workload-Typ-Zuordnung
+
+| Komponente | Workload-Typ | Begruendung |
+|---|---|---|
+| Kafka | StatefulSet | Jeder Broker haelt einen eigenen, nicht austauschbaren Datenbestand (Partitionsreplikate) und braucht stabile Identitaet (Broker-ID im KRaft-Quorum, advertised listener) |
+| MinIO | StatefulSet | Objektdaten persistent, stabiler DNS-Name als S3-Endpoint fuer alle Consumer |
+| Schema-Registry | Deployment | Zustandslos gegenueber Kubernetes - der eigentliche State liegt im Kafka-Topic _schemas, jede Replik liest denselben Log |
+| Producer (synthetic) | Deployment | Zustandslos, beliebig horizontal skalierbar, daher mit HPA gekoppelt |
+| Producer (live) | StatefulSet | Stabile Identitaet fuer zukuenftige Erweiterung um Offset-Tracking je Instanz |
+| Processing (Spark) | Deployment | Checkpoint liegt extern auf PVC, der Pod selbst ist austauschbar |
+| Serving-API | Deployment | Zustandslos, liest nur aus MinIO/Kafka, mehrere Replicas hinter einem Service |
