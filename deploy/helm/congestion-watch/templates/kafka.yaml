@@ -1,0 +1,296 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: {{ .Values.namespace }}
+data:
+  KAFKA_PROCESS_ROLES: "controller,broker"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+  KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "0@kafka-0.kafka-headless.{{ .Values.namespace }}.svc.cluster.local:9093,1@kafka-1.kafka-headless.{{ .Values.namespace }}.svc.cluster.local:9093,2@kafka-2.kafka-headless.{{ .Values.namespace }}.svc.cluster.local:9093"
+  KAFKA_NUM_PARTITIONS: "3"
+  CLUSTER_ID: "Y2t0ZWFtY29uZ2VzdGlvbg"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: {{ .Values.namespace }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: broker
+      port: 9092
+    - name: controller
+      port: 9093
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: broker
+      port: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  serviceName: kafka-headless
+  replicas: {{ .Values.kafka.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+    spec:
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kafka
+      containers:
+        - name: kafka
+          image: {{ .Values.kafka.image }}
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              ORDINAL="${HOSTNAME##*-}"
+              export KAFKA_NODE_ID="${ORDINAL}"
+              export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://${HOSTNAME}.kafka-headless.${POD_NAMESPACE}.svc.cluster.local:9092"
+              echo "starting broker ${KAFKA_NODE_ID} as ${KAFKA_ADVERTISED_LISTENERS}"
+              exec /etc/kafka/docker/run
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          envFrom:
+            - configMapRef:
+                name: kafka-config
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+          startupProbe:
+            tcpSocket: { port: broker }
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket: { port: broker }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: broker }
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.kafka.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.kafka.storage }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics-init
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-topics-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: {{ .Values.kafka.image }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              BS="kafka:9092"
+              echo "warte auf Broker..."
+              until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server "$BS" >/dev/null 2>&1; do
+                sleep 5
+              done
+              create () {
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --create --if-not-exists \
+                  --topic "$1" --partitions "$2" --replication-factor {{ .Values.kafka.replicas }} \
+                  --config min.insync.replicas=2 --config "retention.ms=$3"
+              }
+              {{- range .Values.kafka.topics }}
+              create {{ .name }} {{ .partitions }} {{ .retentionMs }}
+              {{- end }}
+              echo "--- angelegte Topics ---"
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --describe
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 250m, memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  replicas: {{ .Values.schemaRegistry.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: schema-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schema-registry
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: schema-registry
+          image: {{ .Values.schemaRegistry.image }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SCHEMA_REGISTRY_LISTENERS
+              value: "http://0.0.0.0:8081"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
+              value: "3"
+            - name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL
+              value: "BACKWARD"
+          readinessProbe:
+            httpGet:
+              path: /subjects
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.schemaRegistry.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: schema-registry
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: schema-registry
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: avro-schemas
+  namespace: {{ .Values.namespace }}
+data:
+{{ (.Files.Glob "schemas/*.avsc").AsConfig | indent 2 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schema-register
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: schema-registry
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "3"
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: curlimages/curl:8.8.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              SR="http://schema-registry:8081"
+              SUBJECT="traffic.speeds.raw-value"
+              echo "warte auf Schema-Registry..."
+              until curl -sf "$SR/subjects" >/dev/null; do sleep 5; done
+              PAYLOAD=$(awk '{printf "%s", $0}' /schemas/traffic_speed_event.avsc | sed 's/"/\\"/g')
+              CHECK=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                --data "{\"schema\": \"$PAYLOAD\"}" \
+                "$SR/compatibility/subjects/$SUBJECT/versions/latest?verbose=true")
+              if [ "$CHECK" != "404" ] && [ "$CHECK" != "200" ]; then
+                echo "Kompatibilitaetspruefung fehlgeschlagen (HTTP $CHECK)"
+                exit 1
+              fi
+              curl -sf -X POST \
+                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                --data "{\"schema\": \"$PAYLOAD\"}" \
+                "$SR/subjects/$SUBJECT/versions"
+              echo ""
+              echo "--- registrierte Versionen fuer $SUBJECT ---"
+              curl -sf "$SR/subjects/$SUBJECT/versions"
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 100m, memory: 128Mi }
+          volumeMounts:
+            - name: schemas
+              mountPath: /schemas
+      volumes:
+        - name: schemas
+          configMap:
+            name: avro-schemas

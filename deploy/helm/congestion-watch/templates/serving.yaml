@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: serving-config
+  namespace: {{ .Values.namespace }}
+data:
+  MINIO_ENDPOINT: "http://minio:9000"
+  BUCKET_GOLD: "gold"
+  KAFKA_BOOTSTRAP: "kafka:9092"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serving-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: serving-api
+spec:
+  replicas: {{ .Values.serving.replicas }}
+  selector:
+    matchLabels:
+      app: serving-api
+  template:
+    metadata:
+      labels:
+        app: serving-api
+    spec:
+      containers:
+        - name: serving-api
+          image: {{ .Values.serving.image }}
+          ports:
+            - containerPort: {{ .Values.serving.port }}
+          envFrom:
+            - configMapRef:
+                name: serving-config
+            - secretRef:
+                name: minio-credentials
+          readinessProbe:
+            httpGet: { path: /ready, port: {{ .Values.serving.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: {{ .Values.serving.port }} }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.serving.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: serving-api
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: serving-api
+  ports:
+    - port: 80
+      targetPort: {{ .Values.serving.port }}
+{{- if .Values.serving.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: serving-api
+  namespace: {{ .Values.namespace }}
+spec:
+  rules:
+    - {{- if .Values.serving.ingress.host }}
+      host: {{ .Values.serving.ingress.host }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: serving-api
+                port:
+                  number: 80
+{{- end }}

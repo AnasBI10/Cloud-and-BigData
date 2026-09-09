@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingestion-config
+  namespace: {{ .Values.namespace }}
+data:
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+  EVENTS_PER_SECOND: {{ .Values.producer.synthetic.eventsPerSecond | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: socrata-credentials
+  namespace: {{ .Values.namespace }}
+type: Opaque
+stringData:
+  app-token: {{ .Values.socrata.appToken | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-synthetic
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: producer-synthetic
+spec:
+  replicas: {{ .Values.producer.synthetic.replicas }}
+  selector:
+    matchLabels:
+      app: producer-synthetic
+  template:
+    metadata:
+      labels:
+        app: producer-synthetic
+    spec:
+      containers:
+        - name: producer
+          image: {{ .Values.producer.image }}
+          args: ["--mode", "synthetic"]
+          envFrom:
+            - configMapRef:
+                name: ingestion-config
+          resources:
+            {{- toYaml .Values.producer.synthetic.resources | nindent 12 }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: producer-synthetic
+  namespace: {{ .Values.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: producer-synthetic
+  minReplicas: {{ .Values.producer.synthetic.hpa.minReplicas }}
+  maxReplicas: {{ .Values.producer.synthetic.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.producer.synthetic.hpa.targetCPUUtilization }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-live-headless
+  namespace: {{ .Values.namespace }}
+spec:
+  clusterIP: None
+  selector:
+    app: producer-live
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: producer-live
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: producer-live
+spec:
+  serviceName: producer-live-headless
+  replicas: {{ .Values.producer.live.replicas }}
+  selector:
+    matchLabels:
+      app: producer-live
+  template:
+    metadata:
+      labels:
+        app: producer-live
+    spec:
+      containers:
+        - name: producer
+          image: {{ .Values.producer.image }}
+          args: ["--mode", "live"]
+          envFrom:
+            - configMapRef:
+                name: ingestion-config
+            - secretRef:
+                name: socrata-credentials
+          resources:
+            {{- toYaml .Values.producer.live.resources | nindent 12 }}

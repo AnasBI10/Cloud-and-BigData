@@ -1,0 +1,6 @@
+apiVersion: v2
+name: congestion-watch
+description: NYC Congestion Watch - Streaming-Pipeline (Kafka, MinIO, Schema-Registry, Producer, Serving-API)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

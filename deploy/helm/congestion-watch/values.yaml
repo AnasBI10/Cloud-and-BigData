@@ -1,0 +1,77 @@
+namespace: bigdata
+
+resourceQuota:
+  cpu: "6"
+  memory: 12Gi
+  pvcs: "15"
+
+storageClass: local-path
+
+minio:
+  image: minio/minio:latest
+  storage: 5Gi
+  user: admin
+  password: "CHANGE_ME"
+  buckets:
+    - bronze
+    - gold
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+
+kafka:
+  image: apache/kafka:3.9.0
+  replicas: 3
+  storage: 1Gi
+  topics:
+    - name: traffic.speeds.raw
+      partitions: 12
+      retentionMs: "604800000"
+    - name: weather.observations.raw
+      partitions: 5
+      retentionMs: "604800000"
+    - name: traffic.speeds.dlq
+      partitions: 3
+      retentionMs: "1209600000"
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits:   { memory: 2Gi }
+
+schemaRegistry:
+  image: confluentinc/cp-schema-registry:7.6.1
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits:   { cpu: 250m, memory: 1Gi }
+
+producer:
+  image: congestion-watch/ingestion:0.1.2
+  synthetic:
+    replicas: 1
+    eventsPerSecond: 20
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 250m, memory: 256Mi }
+    hpa:
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilization: 70
+  live:
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 192Mi }
+      limits:   { cpu: 250m, memory: 384Mi }
+
+socrata:
+  appToken: "CHANGE_ME"
+
+serving:
+  image: congestion-watch/serving:0.1.0
+  replicas: 2
+  port: 8000
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  ingress:
+    enabled: true
+    host: ""
