@@ -124,48 +124,37 @@ Meldefrequenz übers Jahr an (Full-Table-Scan nicht möglich, siehe oben).
 Für den Prototyp vertretbar, im Bericht als Annahme zu kennzeichnen,
 nicht als gemessenen Wert.
 
-### Bulk-Export für Baseline-Historie
+### Baseline-Historie: Strategiewechsel (SCRUM-83)
 
-**Vorgehen:** Automatisiertes Pagination-Skript (`fetch_dot_baseline.py`,
-unterbrechungssicher über Checkpoint-Chunks) gegen `$where`-Filter auf
-`data_as_of` und `status='0'`, 19 Chunks à ≤50.000 Zeilen zusammengeführt.
+**Ursprünglicher Plan (verworfen):** Ein separates Pagination-Skript
+(`fetch_dot_baseline.py`) sollte einmalig 6 Wochen Historie (21.07.–31.08.2026,
+940.234 Zeilen, 94 von 125 Sensoren) per Bulk-Export ziehen. Diese Datei
+(`dot_baseline_full.parquet`) ist nicht mehr auffindbar — weder im Repo noch
+auf einer der Cluster-Instanzen.
 
-**Zeitraum bewusst gewählt:** Ein erster Test mit dem Zeitraum
-Juni 2026 ergab nur 101 von 125 aktuell aktiven Sensoren — zu weit
-zurückliegend. Der gewählte Zeitraum 21.07.–31.08.2026 (letzte ~6
-Wochen vor Sprint-Start) deckt 94 von 125 Sensoren ab und liegt damit
-näher an der aktuellen Sensorlage.
+**Neue Strategie:** Kein separater Bulk-Export mehr. Der Live-Poller
+(`producer-live`) und der synthetische Producer (`producer-synthetic`) laufen
+seit dem Cluster-Deployment ohnehin kontinuierlich und befüllen die
+Silver-Schicht (`s3a://bronze/traffic_speeds_valid`, bereits `status=0`-gefiltert)
+über denselben Codepfad wie der Live-Betrieb. `src/processing/compute_baseline.py`
+aggregiert direkt daraus `link_id × Wochentag × Stunde` und schreibt
+`s3a://gold/baseline_profile`. Kappa-konsequent (README 3.1: „Historie ist nur
+ein langsamer Stream") und ohne zusätzliches Tool.
 
-**Ergebnis:** `dot_baseline_full.parquet`
+Der synthetische Producer wurde nicht zufällig mit einem Tagesgang gebaut
+(`HOURLY_FACTOR` in `src/ingestion/synthetic.py`) — genau damit die Baseline
+auch dann nicht flach ist, wenn noch nicht wochenlang echte Live-Daten
+vorliegen.
 
-| Kennzahl | Wert |
-|---|---|
-| Zeilen | 940.234 |
-| Zeitraum | 21.07.2026 00:00 – 31.08.2026 23:58 (~42 Tage) |
-| Distinkte `link_id` | 94 |
-| Status | durchgängig `0` (Filter griff korrekt) |
-| Duplikate (`link_id`+`data_as_of`) | 0 |
-| `speed`-Wertebereich | 0,62 – 109,36 (plausibel) |
-| `travel_time`-Wertebereich | 20 – 9.193 Sekunden (plausibel) |
-| Records/Sensor | Median 11.567, Min 107 (ein Ausreißer), Max 11.953 |
+**Bewusste, offen benannte Grenze:** Solange das System nicht mindestens eine
+volle Woche durchgehend läuft, fehlen einzelne Wochentage in der Baseline —
+betroffene `link_id × Wochentag × Stunde`-Zellen tauchen einfach nicht in
+`baseline_profile` auf. Der Join in `streaming_job_bsg.py` behandelt das
+bereits als `has_baseline=false`, kein Sonderfall nötig. Zellen mit weniger als
+`MIN_SAMPLES_PER_CELL = 5` Messungen werden ebenfalls nicht geschrieben, weil
+eine Standardabweichung aus zu wenigen Werten nicht aussagekräftig ist.
 
-**Geprüfte und noch offene Baseline-Lücke:** 94 Sensoren in der Historie
-gegenüber 125 aktuell aktiven. Geprüft und ausgeschlossen: Export
-unvollständig (0 Duplikate, volle Zeitspanne abgedeckt, nur 1 von 94
-Sensoren beginnt spät im Fenster mit nur 107 Records — eher
-unregelmäßiges Melden als Neuzugang). **Wahrscheinlichste Erklärung:**
-Die zusätzlichen ~31 Sensoren sind erst nach dem 31.08.2026 aktiv
-geworden und liegen außerhalb des exportierten Fensters — mit rein
-historischen Bulk-Daten nicht weiter aufklärbar.
-
-**Entscheidung zur Behandlung:** Segmente ohne ausreichende
-Baseline-Historie laufen ohne Baseline-Vergleich und werden im
-Congestion-Score explizit als „Historie unzureichend" markiert, bis
-genug eigene Live-Daten vorliegen. Eine bewusste, im Bericht offen
-benannte Scope-Grenze (Abschnitt 12), kein verstecktes Problem.
-
-**Ablage:** aktuell lokal (`dot_baseline_full.parquet`); Umzug nach
-MinIO, sobald SCRUM-78 steht — Pfad hier nachtragen.
+**Ablage:** `s3a://gold/baseline_profile` (Delta), MinIO, siehe SCRUM-78.
 
 ---
 
