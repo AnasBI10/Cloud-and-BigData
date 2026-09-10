@@ -4,9 +4,6 @@ metadata:
   name: serving-config
   namespace: {{ .Values.namespace }}
 data:
-  # Konfiguration der Serving-API (src/serving/config.py). Die frueheren
-  # Schluessel BUCKET_GOLD/MINIO_ENDPOINT liest die API nicht — ohne
-  # GOLD_READER blieb sie im Fixture-Modus, also auf erfundenen Zahlen.
   GOLD_READER: "delta"
   DELTA_URI: "s3://gold/congestion_scores"
   BASELINE_URI: "s3://gold/baseline_profile"
@@ -19,15 +16,7 @@ data:
   DEFAULT_LIMIT: "10"
   MAX_LIMIT: "200"
   LOG_LEVEL: "INFO"
-  # UI und API liegen hinter demselben Ingress, der Browser stellt also
-  # gleiche-Herkunft-Anfragen und braucht CORS gar nicht. "*" ist trotzdem
-  # der Default, weil der Ingress-Host im Chart nicht feststeht. Sobald er es
-  # tut, gehoert hier die konkrete Origin hin: seit SCRUM-89 nimmt die API
-  # POST entgegen, und "*" heisst, dass jede beliebige Seite im Browser eines
-  # Nutzers Events einspeisen koennte.
   CORS_ORIGINS: {{ .Values.serving.corsOrigins | quote }}
-  # Einspeisung aus der UI (SCRUM-89): echter Producer gegen dieselbe
-  # Schema-Registry wie die Ingestion-Pods.
   INGEST_MODE: "kafka"
   KAFKA_BOOTSTRAP: "kafka:9092"
   SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
@@ -55,10 +44,6 @@ spec:
       labels:
         app: serving-api
     spec:
-      # Kubernetes injiziert fuer jeden Service Umgebungsvariablen (KAFKA_PORT,
-      # SCHEMA_REGISTRY_PORT, ...). Sie kollidieren zwar aktuell mit keinem
-      # unserer Namen, aber die Ingestion ist genau darueber schon einmal
-      # gestolpert — dieselbe Absicherung wie dort.
       enableServiceLinks: false
       containers:
         - name: serving-api
@@ -68,8 +53,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: serving-config
-            # Liefert MINIO_ROOT_USER/MINIO_ROOT_PASSWORD; config.py nimmt sie
-            # als Fallback fuer S3_ACCESS_KEY/S3_SECRET_KEY entgegen.
             - secretRef:
                 name: minio-credentials
           readinessProbe:
@@ -109,9 +92,6 @@ spec:
       {{- end }}
       http:
         paths:
-          # Nur die API-Pfade. "/" gehoert seit SCRUM-91 der UI — stuende hier
-          # weiterhin "/", wuerden sich zwei Ingress-Regeln um dieselbe Wurzel
-          # streiten und je nach Auswertung die UI oder die API verschwinden.
           {{- range $path := list "/api" "/docs" "/openapi.json" "/health" "/ready" }}
           - path: {{ $path }}
             pathType: Prefix

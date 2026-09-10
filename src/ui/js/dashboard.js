@@ -1,38 +1,19 @@
-/* Rolle Anzeige (SCRUM-90): Karte, Anomalie-Rangliste, Zeitreihe.
- *
- * Konsumiert ausschliesslich die Serving-API. Kein Zugriff auf Kafka, Delta
- * oder MinIO — was hier steht, hat die Pipeline durchlaufen.
- *
- * Karte als eigenes SVG statt Kartenbibliothek: es sind 125 Polylinien mit
- * rund 1300 Punkten, die aus dem DOT-Feed selbst stammen (link_points im
- * Seed). Eine Bibliothek von einem CDN waere eine Fremdabhaengigkeit zur
- * Laufzeit, dazu Kachel-Lizenzen — fuer den Nutzen zu teuer. So bleibt das
- * Bundle self-contained und laeuft auch ohne Internet.
- */
-
 import { api, showApiStatus, timeNYC } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
 
-/* Der Server-Cache der API steht auf 20 s (CACHE_TTL_S). Haeufiger zu fragen
- * liefert dieselbe Antwort und kostet nur Anfragen. */
 const POLL_MS = 20000;
 const MIN_SCORE = 2.0;
 
 const MAP = { w: 1000, h: 700, pad: 24 };
 const CHART = { w: 1000, h: 320, l: 46, r: 12, t: 26, b: 26 };
-/* Fenstergroesse des Sinks. Groessere Luecken werden als Luecken gezeichnet,
- * nicht ueberbrueckt — der Gold-Vertrag sagt ausdruecklich, dass nicht
- * interpoliert wird. */
 const WINDOW_MS = 5 * 60 * 1000;
 
 let segments = [];
 let segmentById = new Map();
-let paths = new Map(); // link_id -> <path> auf der Karte
+let paths = new Map();
 let selected = null;
 let project = null;
-
-/* --- Start -------------------------------------------------------------- */
 
 async function init() {
   showApiStatus($("api-status"));
@@ -50,8 +31,6 @@ async function init() {
     if (selected) await selectSegment(selected, { keepScroll: true });
   }, POLL_MS);
 }
-
-/* --- Karte -------------------------------------------------------------- */
 
 async function loadSegments({ rebuild = true } = {}) {
   let data;
@@ -83,13 +62,8 @@ function buildBoroughFilter() {
   }
 }
 
-/* Web-Mercator auf die Bounding Box der tatsaechlichen Daten. Ohne die
- * Mercator-Korrektur waere NYC merklich in die Breite gezogen. */
+// Web-Mercator, skaliert auf die Bounding Box der tatsaechlichen Segmente.
 function makeProjection(points) {
-  // Der Faktor 180/PI ist nicht kosmetisch: die Mercator-Formel liefert ein
-  // Ergebnis in Radiant-Einheiten, der Laengengrad steht daneben in Grad.
-  // Ohne die Umrechnung ist die y-Spanne rund 57-mal zu klein und die ganze
-  // Stadt kollabiert zu einem waagerechten Strich.
   const merc = (lat) =>
     (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 180 / 2));
   const lons = points.map((p) => p[1]);
@@ -98,14 +72,12 @@ function makeProjection(points) {
   const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
 
   const inner = { w: MAP.w - 2 * MAP.pad, h: MAP.h - 2 * MAP.pad };
-  // Seitenverhaeltnis erhalten: sonst verzerrt die Karte je nach Fenster.
   const scale = Math.min(inner.w / (lon1 - lon0), inner.h / (y1 - y0));
   const offX = MAP.pad + (inner.w - (lon1 - lon0) * scale) / 2;
   const offY = MAP.pad + (inner.h - (y1 - y0) * scale) / 2;
 
   return (lat, lon) => [
     offX + (lon - lon0) * scale,
-    // y invertieren: SVG zaehlt nach unten, Breitengrade nach oben.
     offY + (y1 - merc(lat)) * scale,
   ];
 }
@@ -127,7 +99,6 @@ function buildMap() {
   const geo = segments.map((s) => ({ s, pts: parsePoints(s.link_points) }));
   const usable = geo.filter((g) => g.pts.length >= 2);
   if (!usable.length) {
-    // Ohne Geometrie keine Karte. Ehrlich sagen statt leere Flaeche zeigen.
     svg.innerHTML =
       '<text x="500" y="340" text-anchor="middle" class="map-empty">' +
       "Keine Segmentgeometrie vorhanden (link_points leer)." +
@@ -153,12 +124,7 @@ function buildMap() {
   }
 }
 
-/* Farbstufe eines Segments. Die Reihenfolge der Abfragen ist die Aussage:
- * "unbewertbar" schlaegt alles, danach "keine Messung", erst dann der Score. */
 function stateOf(segment) {
-  // has_baseline kommt jetzt aus der Baseline-Tabelle selbst und nicht mehr
-  // aus dem letzten Fenster — ein Segment ohne aktuelle Messung ist deshalb
-  // "stale" und nicht faelschlich "unbewertbar".
   if (!segment.has_baseline) return "nobase";
   if (segment.last_seen === null || segment.last_score === null) return "stale";
   const score = segment.last_score;
@@ -187,8 +153,7 @@ function updateCounts(generatedAt) {
   $("map-counts").textContent =
     `${total} Segmente · ${measured} mit aktueller Messung · ${nobase} unbewertbar`;
   $("freshness").textContent =
-    `Stand ${timeNYC(generatedAt)} · Aktualisierung alle ${POLL_MS / 1000} s ` +
-    "(entspricht dem Server-Cache der API)";
+    `Stand ${timeNYC(generatedAt)} · Aktualisierung alle ${POLL_MS / 1000} s`;
 }
 
 function showTip(event, linkId) {
@@ -213,8 +178,6 @@ function hideTip() {
   $("map-tip").hidden = true;
 }
 
-/* --- Rangliste ---------------------------------------------------------- */
-
 async function refreshRanking() {
   const borough = $("borough-filter").value;
   const params = { limit: 10, min_score: MIN_SCORE };
@@ -228,9 +191,6 @@ async function refreshRanking() {
     return;
   }
 
-  // Der Umschlag traegt die Datenqualitaet mit. Nur die Treffer zu zeigen,
-  // wuerde die Segmente ohne Baseline stillschweigend als unauffaellig
-  // darstellen — genau das soll das Dashboard nicht tun.
   $("rank-meta").textContent =
     `Fenster ${timeNYC(data.latest_window)} · ${data.total_segments} Segmente gemessen, ` +
     `davon ${data.segments_with_baseline} bewertbar und ` +
@@ -264,8 +224,6 @@ async function refreshRanking() {
     list.appendChild(li);
   }
 }
-
-/* --- Zeitreihe ---------------------------------------------------------- */
 
 async function selectSegment(linkId, { keepScroll = false } = {}) {
   selected = linkId;
@@ -339,16 +297,12 @@ function renderChart(points) {
     return el;
   };
 
-  // Achsen und Gitter
   for (let i = 0; i <= 4; i++) {
     const v = vMin + ((vMax - vMin) * i) / 4;
     add("line", { x1: CHART.l, x2: CHART.w - CHART.r, y1: y(v), y2: y(v) }, "grid");
     add("text", { x: CHART.l - 6, y: y(v) + 4, "text-anchor": "end" }, "axis").textContent =
       v.toFixed(0);
   }
-  /* Zeitachse. Ueber mehr als zwoelf Stunden reicht die Uhrzeit nicht: zwei
-   * Beschriftungen "05:55" und "05:50" an den Enden eines Tagesfensters lesen
-   * sich, als liefe die Zeit rueckwaerts. Dann gehoert das Datum dazu. */
   const span = t1 - t0;
   const withDate = span > 12 * 3600 * 1000;
   const label = (ms) =>
@@ -369,9 +323,7 @@ function renderChart(points) {
   }
   add("text", { x: 4, y: 12 }, "axis").textContent = "mph";
 
-  /* In Segmente zerlegen: eine Luecke groesser als ein Fenster wird nicht
-   * ueberbrueckt. Eine durchgezogene Linie ueber eine Stunde ohne Messung
-   * waere eine Behauptung, die die Daten nicht decken. */
+  // Luecken > 1.5 Fenster werden nicht ueberbrueckt.
   const runs = [];
   let run = [];
   for (const r of rows) {
@@ -383,7 +335,6 @@ function renderChart(points) {
   }
   if (run.length) runs.push(run);
 
-  // Baseline-Band (± 1 σ)
   for (const seg of runs) {
     const band = seg.filter((r) => r.base !== null && r.sd !== null);
     if (band.length >= 2) {
@@ -410,14 +361,10 @@ function renderChart(points) {
         "line-speed"
       );
     } else if (speed.length === 1) {
-      // Einzelner Punkt zwischen zwei Luecken: als Punkt zeichnen, sonst
-      // verschwindet eine tatsaechlich vorhandene Messung.
       add("circle", { cx: x(speed[0].t), cy: y(speed[0].speed), r: 2.5 }, "dot-speed");
     }
   }
 }
-
-/* --- Hilfen ------------------------------------------------------------- */
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({

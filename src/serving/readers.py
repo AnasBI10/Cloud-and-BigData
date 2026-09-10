@@ -1,19 +1,4 @@
-"""Zugriff auf die Gold-Schicht (SCRUM-79).
-
-Zwei Implementierungen hinter einer Schnittstelle:
-
-* ``FixtureReader``  — erzeugt den Vertrag aus docs/gold-contract.md aus den
-  echten link_id-Werten des Seeds. Entwicklungsmodus, solange SCRUM-86 die
-  Delta-Tabelle noch nicht schreibt. NICHT der Abgabestand.
-* ``DeltaReader``    — liest die echte Delta-Tabelle von MinIO und verbindet
-  sie ueber ``BaselineIndex`` mit der Baseline-Tabelle aus
-  compute_baseline.py. Der Sink schreibt andere Spaltennamen als der Vertrag;
-  die Abbildung steht in ``DeltaReader.SINK_COLUMNS``.
-
-Bewusst ohne Spark: die API braucht keine Session, keinen Executor und keine
-JVM, um eine Delta-Tabelle zu lesen. delta-rs liest das Transaktionslog nativ,
-der Pod bleibt bei ~200 MB statt ~1,5 GB. Das ist auch der Grund, warum die
-Serving-Schicht unabhaengig vom Spark-Job skaliert (SCRUM-93).
+"""Zugriff auf die Gold-Schicht (SCRUM-79)
 """
 
 from __future__ import annotations
@@ -36,8 +21,7 @@ WINDOW_MINUTES = 5
 
 
 class ReaderError(RuntimeError):
-    """Gold-Schicht nicht lesbar. Fuehrt zu 503, nicht zu 500 — der Dienst ist
-    in Ordnung, seine Datenquelle nicht."""
+    """Gold-Schicht nicht lesbar. Fuehrt zu 503, nicht zu 500."""
 
 
 class GoldReader(Protocol):
@@ -54,18 +38,7 @@ class GoldReader(Protocol):
     def probe(self) -> tuple[bool, str]: ...
 
 
-# ---------------------------------------------------------------------------
-# Hilfsmittel
-# ---------------------------------------------------------------------------
-
-
 class TTLCache:
-    """Ein Wert, eine Ablaufzeit, ein Lock.
-
-    Der Grund steht in config.py: das Dashboard pollt haeufiger, als die
-    Gold-Tabelle neue Fenster bekommt.
-    """
-
     def __init__(self, ttl_s: int):
         self._ttl = ttl_s
         self._lock = threading.Lock()
@@ -87,9 +60,6 @@ class TTLCache:
 
 
 def load_seed(settings: Settings) -> list[dict]:
-    """Dieselbe Datei, die auch die Producer verwenden (src/ingestion/common.py).
-    Sie ist die Stammdatenquelle fuer die Karte: 125 Segmente mit Borough und
-    Klartextnamen."""
     with settings.seed_path.open(encoding="utf-8") as fh:
         seed = json.load(fh)
     log.info("Seed geladen: %d Segmente", len(seed))
@@ -97,13 +67,8 @@ def load_seed(settings: Settings) -> list[dict]:
 
 
 def _stable_fraction(*parts: str) -> float:
-    """Deterministischer Wert in [0,1) aus beliebigen Strings.
-
-    Deterministisch und nicht zufaellig, damit dieselbe link_id ueber
-    Neustarts und ueber mehrere API-Repliken hinweg dasselbe Profil hat.
-    Bei zwei Repliken hinter einem Service wuerde ein echter Zufallswert
-    sonst je nach getroffenem Pod andere Zahlen liefern.
-    """
+    """Deterministischer Wert in [0,1) — dieselbe link_id liefert ueber
+    Neustarts und Repliken hinweg dasselbe Profil."""
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
@@ -119,38 +84,20 @@ def floor_window(ts: datetime) -> datetime:
 
 
 class FixtureReader:
-    """Erzeugt vertragskonforme Fenster ohne Delta-Tabelle.
-
-    Modelliert bewusst die Eigenschaften, die im Dashboard sichtbar werden
-    muessen und die in der README als Befund dokumentiert sind:
-
-    * Tagesgang (nachts frei, Feierabend langsam)
-    * ~25 % der Segmente ohne Messung im aktuellen Fenster (Meldefrequenz
-      ~7,7 Minuten trifft nicht jedes 5-Minuten-Fenster)
-    * 31 von 125 Segmenten ohne Baseline -> unbewertbar, nicht unauffaellig
-    * einige dauerhaft auffaellige Segmente, damit die Rangliste nicht leer ist
-    """
-
     name = "fixture"
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.seed = load_seed(settings)
-        # Deterministische Auswahl der Segmente ohne Historie. Entspricht dem
-        # gemessenen Befund: 94 von 125 Segmenten haben Baseline-Abdeckung.
         self._no_baseline = {
             s["link_id"]
             for s in self.seed
             if _stable_fraction("baseline", s["link_id"]) < 31 / 125
         }
 
-    # -- Modell ----------------------------------------------------------
-
     def _baseline(self, link_id: str, ts: datetime) -> tuple[float, float]:
-        """Erwartungswert und Streuung fuer link_id x Wochentag x Stunde."""
         base = 22.0 + 26.0 * _stable_fraction("speed", link_id)
         hour = ts.hour
-        # Tagesgang: Minimum gegen 8 und 18 Uhr, Maximum nachts.
         rush = math.exp(-(((hour - 8) / 2.2) ** 2)) + math.exp(
             -(((hour - 18) / 2.4) ** 2)
         )
@@ -173,14 +120,12 @@ class FixtureReader:
         link_id = segment["link_id"]
         slot = window_start.strftime("%Y-%m-%dT%H:%M")
 
-        # Nicht jedes Segment meldet in jedem Fenster.
         if _stable_fraction("present", link_id, slot) < 0.28:
             return None
 
         expected, stddev = self._baseline(link_id, window_start)
         condition, temp, precip = self._weather(window_start, segment.get("borough"))
 
-        # Abweichung: meist Rauschen, bei einigen Segmenten dauerhaft nach unten.
         noise = (_stable_fraction("noise", link_id, slot) - 0.5) * 2.0 * stddev
         chronic = _stable_fraction("chronic", link_id) < 0.10
         incident = _stable_fraction("incident", link_id, slot[:13]) < 0.06
@@ -190,8 +135,6 @@ class FixtureReader:
         if incident:
             drop += 2.6 * stddev
         if condition in ("rain", "drizzle"):
-            # Regen macht alle langsamer — das ist genau der Effekt, den die
-            # Baseline herausrechnen soll (README 1.1).
             drop += 0.55 * stddev
 
         speed = max(2.0, expected - drop + noise)
@@ -219,8 +162,6 @@ class FixtureReader:
             precipitation_mm=precip,
             is_late_arrival=_stable_fraction("late", link_id, slot) < 0.03,
         )
-
-    # -- Schnittstelle ---------------------------------------------------
 
     def latest_windows(self) -> list[SegmentWindow]:
         window_start = floor_window(datetime.now(timezone.utc)) - timedelta(
@@ -266,21 +207,10 @@ class FixtureReader:
 class BaselineIndex:
     """Erwartungswert und Streuung je ``link_id`` x Wochentag x Stunde.
 
-    Den Score bildet seit SCRUM-83 der Streaming-Job. Die API liest dieselbe
-    Tabelle trotzdem, aber fuer zwei Fragen, die in der Gold-Tabelle nicht
-    stehen, weil dort nur Segmente auftauchen, die gerade gemeldet haben:
-
-    * ``links()`` — welche Segmente sind ueberhaupt bewertbar? Die Karte
-      zeichnet alle 125, auch die ohne aktuelle Messung. Ohne diese Auskunft
-      saehe "hat gerade nichts gesendet" aus wie "hat keine Historie".
-    * ``lookup()`` — welche Geschwindigkeit ist fuer dieses Segment zu dieser
-      Stunde ueblich? Grundlage des Szenario-Generators (SCRUM-89).
-
-    Beides liest dieselbe Quelle wie der Spark-Job, es entsteht also keine
-    zweite Score-Definition.
-
-    Fehlt die Tabelle, ist der Index leer. Dann gilt jedes Segment als
-    unbewertbar — kein Grund fuer einen 503.
+    Zusaetzlich zwei Fragen, die die Gold-Tabelle allein nicht beantwortet:
+    welche Segmente ueberhaupt bewertbar sind (``links()``, fuer die Karte)
+    und welche Geschwindigkeit fuer eine Stunde ueblich ist (``lookup()``,
+    fuer den Szenario-Generator).
     """
 
     def __init__(self, settings: Settings):
@@ -289,12 +219,9 @@ class BaselineIndex:
 
     @staticmethod
     def spark_weekday(ts: datetime) -> int:
-        """Wochentag in der Zaehlung von Sparks ``dayofweek``: 1 = Sonntag.
-
-        Python zaehlt ab Montag. Die Schluessel muessen exakt so gebildet
-        werden wie in compute_baseline.py, sonst trifft der Join die falsche
-        Zelle und der Score ist um Tage verschoben.
-        """
+        """Sparks ``dayofweek``-Zaehlung: 1 = Sonntag. Muss exakt wie in
+        compute_baseline.py gebildet werden, sonst trifft der Join die
+        falsche Zelle."""
         return (ts.isoweekday() % 7) + 1
 
     def _load(self) -> dict[tuple[str, int, int], tuple[float, float]]:
@@ -318,10 +245,9 @@ class BaselineIndex:
                 ]
             ).to_pylist()
         except Exception as exc:
-            # Haeufigster Fall: compute_baseline.py ist noch nicht gelaufen.
             log.warning(
                 "Baseline-Tabelle %s nicht lesbar (%s) — alle Segmente gelten "
-                "als unbewertbar, has_baseline=false",
+                "als unbewertbar",
                 self.settings.baseline_uri,
                 exc,
             )
@@ -331,9 +257,7 @@ class BaselineIndex:
         for r in rows:
             stddev = r.get("baseline_stddev")
             speed = r.get("baseline_speed")
-            # stddev ist null bei Zellen mit genau einer Messung und 0.0 bei
-            # konstanter Geschwindigkeit. In beiden Faellen ist der z-Score
-            # nicht definiert — die Zelle zaehlt nicht als Baseline.
+            # stddev=null (eine Messung) oder 0 (konstant): z-Score undefiniert.
             if speed is None or stddev is None or stddev <= 0:
                 continue
             index[(r["link_id"], int(r["weekday"]), int(r["hour_of_day"]))] = (
@@ -356,13 +280,6 @@ class BaselineIndex:
         return len(self._cache.get(self._load))
 
     def links(self) -> set[str]:
-        """Alle Segmente, fuer die ueberhaupt eine Baseline-Zelle existiert.
-
-        Unabhaengig davon, ob gerade eine Messung vorliegt: ein Segment ohne
-        aktuelles Fenster ist nicht unbewertbar, es hat nur gerade nichts
-        gemeldet. Das sind zwei verschiedene Aussagen, und die Karte muss sie
-        auseinanderhalten koennen.
-        """
         return {link_id for link_id, _, _ in self._cache.get(self._load)}
 
 
@@ -371,8 +288,6 @@ def _round(value, digits: int = 2) -> float | None:
 
 
 def _as_utc(ts: datetime) -> datetime:
-    """Delta liefert je nach Schreiber tz-behaftete oder naive Zeitstempel.
-    Der Vertrag sagt UTC — naive Werte werden entsprechend gelesen."""
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
@@ -384,26 +299,14 @@ def _as_utc(ts: datetime) -> datetime:
 
 
 class DeltaReader:
-    """Liest die Gold-Tabelle von MinIO.
-
-    Bewusst ohne Spark: delta-rs liest das Transaktionslog nativ, der Pod
-    bleibt bei ~200 MB statt ~1,5 GB. Das ist auch der Grund, warum die
-    Serving-Schicht unabhaengig vom Spark-Job skaliert (SCRUM-93).
-
-    Seit SCRUM-83 schreibt der Streaming-Job den Baseline-Join und den
-    z-Score selbst. Die API rechnet deshalb nichts mehr aus, sie liest die
-    Spalten so, wie sie im Vertrag stehen. ``BaselineIndex`` bleibt fuer die
-    zwei Fragen, die die Gold-Tabelle nicht beantwortet — welche Segmente
-    ueberhaupt bewertbar sind und mit welcher Geschwindigkeit ein Szenario
-    startet (siehe docs/gold-contract.md).
-    """
+    """Liest die Gold-Tabelle von MinIO. Der Streaming-Job schreibt Baseline-
+    Join und Score selbst (SCRUM-83); die API liest die Spalten nur, wie sie
+    im Vertrag stehen."""
 
     name = "delta"
 
-    # Vertragsname (models.SegmentWindow) -> Spalte im Sink. Seit der
-    # Umbenennung in 5f9b890 stimmen beide ueberein; die Abbildung bleibt als
-    # die eine Stelle bestehen, an der eine kuenftige Abweichung eingetragen
-    # wird, statt sie ueber den Reader zu verteilen.
+    # Vertragsname (models.SegmentWindow) -> Spalte im Sink. Eine Stelle fuer
+    # eine kuenftige Abweichung, statt sie ueber den Reader zu verteilen.
     SINK_COLUMNS = {
         "link_id": "link_id",
         "window_start": "window_start",
@@ -423,8 +326,6 @@ class DeltaReader:
         "is_late_arrival": "is_late_arrival",
     }
 
-    # Pflichtspalten. Fehlt eine davon, passt die Tabelle nicht zum Vertrag
-    # und ein stiller Teil-Erfolg waere schlimmer als ein klarer Fehler.
     REQUIRED = ("link_id", "window_start", "window_end", "speed_avg")
 
     def __init__(self, settings: Settings):
@@ -440,9 +341,6 @@ class DeltaReader:
         try:
             return DeltaTable(self.settings.delta_uri, storage_options=self._storage)
         except Exception as exc:
-            # Haeufigster Fall im Betrieb: der Spark-Job hat noch nichts
-            # geschrieben, die Tabelle existiert nicht. Das ist kein Absturz,
-            # sondern ein "noch nicht bereit".
             raise ReaderError(f"Delta-Tabelle nicht lesbar: {exc}") from exc
 
     def _query(self, since: datetime, link_id: str | None = None) -> list[dict]:
@@ -459,22 +357,15 @@ class DeltaReader:
                 "Vertrag und Sink laufen auseinander, siehe docs/gold-contract.md"
             )
 
-        # Zeitstempel muessen zur Spalte passen: vergleicht man einen
-        # tz-behafteten Wert mit einer naiven Spalte, wirft pyarrow.
         field = dataset.schema.field("window_start")
         since = since if getattr(field.type, "tz", None) else since.replace(tzinfo=None)
 
         expr = pads.field("window_start") >= since
         if "window_date" in available:
-            # Partitionspruning, sobald SCRUM-87 die Spalte schreibt: schneidet
-            # ganze Verzeichnisse weg, bevor eine Datei geoeffnet wird. Der
-            # aktuelle Sink partitioniert noch nicht, deshalb optional.
             expr = (pads.field("window_date") >= since.strftime("%Y-%m-%d")) & expr
         if link_id is not None:
             expr = expr & (pads.field("link_id") == link_id)
 
-        # pyarrow erwartet Ausdruecke, keine Spaltennamen — so wird die
-        # Umbenennung schon beim Lesen erledigt und nicht zeilenweise danach.
         columns = {
             alias: pads.field(source)
             for alias, source in self.SINK_COLUMNS.items()
@@ -482,12 +373,7 @@ class DeltaReader:
         }
         absent = [a for a in self.SINK_COLUMNS if a not in columns]
         if absent:
-            # Optionale Spalten (Wetter-Enrichment SCRUM-84, Late-Marker) sind
-            # ein Uebergangszustand. Nicht abbrechen, aber laut genug loggen.
-            log.warning(
-                "Gold-Tabelle ohne Spalten %s — Vertrag pruefen (gold-contract.md)",
-                absent,
-            )
+            log.warning("Gold-Tabelle ohne Spalten %s — Vertrag pruefen", absent)
 
         try:
             table = dataset.to_table(filter=expr, columns=columns)
@@ -496,13 +382,6 @@ class DeltaReader:
         return table.to_pylist()
 
     def _to_model(self, row: dict) -> SegmentWindow:
-        """Sink-Zeile -> Vertragsobjekt.
-
-        Ohne Umrechnung: ``congestion_score`` und ``has_baseline`` kommen
-        seit SCRUM-83 fertig aus dem Job. Sie hier ein zweites Mal zu bilden
-        hiesse, zwei Definitionen desselben Werts zu pflegen — und die erste
-        Abweichung faende niemand.
-        """
         speed = row.get("speed_avg")
         score = row.get("congestion_score")
         return SegmentWindow(
@@ -525,25 +404,15 @@ class DeltaReader:
         )
 
     def _tumbling(self, rows: list[dict]) -> list[dict]:
-        """Aus den gleitenden Fenstern des Sinks die nicht ueberlappenden
-        herausgreifen.
-
-        Der Job schreibt 5-Minuten-Fenster mit 1 Minute Versatz, also fuenf
-        Zeilen je Segment und Fuenfminutenblock, die einander zu 80 Prozent
-        enthalten. Fuer eine Zeitreihe ist nur jede fuenfte davon eine neue
-        Information.
-        """
+        """Der Sink schreibt 5-Minuten-Fenster mit 1 Minute Versatz, also
+        fuenf ueberlappende Zeilen je Segment und Fuenfminutenblock. Fuer
+        eine Zeitreihe ist nur jede fuenfte eine neue Information."""
         if not self.settings.tumbling_only:
             return rows
         aligned = [r for r in rows if _as_utc(r["window_start"]).minute % WINDOW_MINUTES == 0]
-        # Nie alles wegfiltern: haette der Job eine andere Fenstergroesse,
-        # bliebe sonst eine leere Zeitreihe statt einer dichten.
         return aligned or rows
 
     def latest_windows(self) -> list[SegmentWindow]:
-        # Drei Fenster zurueck, dann je Segment das juengste behalten: bei einer
-        # Meldefrequenz von ~7,7 Minuten ist das letzte 5-Minuten-Fenster fuer
-        # viele Segmente leer.
         since = datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MINUTES * 3)
         newest: dict[str, dict] = {}
         for row in self._query(since):
@@ -559,13 +428,6 @@ class DeltaReader:
         return [self._to_model(r) for r in rows]
 
     def reference_speed(self, link_id: str, ts: datetime) -> float | None:
-        """Erwartungswert des Segments fuer diese Stunde.
-
-        Grundlage fuer den Szenario-Generator (SCRUM-89): ein Stau-Szenario
-        soll von der ueblichen Geschwindigkeit DIESES Segments ausgehen, nicht
-        von einem pauschalen Wert — sonst erzeugt es auf einem langsamen
-        Segment eine Beschleunigung.
-        """
         cell = self.baseline.lookup(link_id, ts)
         return cell[0] if cell else None
 
@@ -590,10 +452,7 @@ def build_reader(settings: Settings) -> GoldReader:
     if settings.gold_reader == "delta":
         log.info("Gold-Reader: delta (%s)", settings.delta_uri)
         return DeltaReader(settings)
-    log.warning(
-        "Gold-Reader: FIXTURE — Entwicklungsmodus, nicht der Abgabestand. "
-        "Fuer echten Betrieb GOLD_READER=delta setzen."
-    )
+    log.warning("Gold-Reader: FIXTURE — Entwicklungsmodus, nicht der Abgabestand.")
     return FixtureReader(settings)
 
 
@@ -603,15 +462,8 @@ def segments_from(
     baseline_links: set[str] | None = None,
 ) -> list[Segment]:
     """Kartengrundlage: alle Seed-Segmente, angereichert um den letzten
-    bekannten Zustand. Segmente ohne aktuelle Messung fallen nicht weg —
-    sie erscheinen als grau, nicht als nicht vorhanden.
-
-    ``baseline_links`` sind die Segmente, fuer die eine Baseline existiert.
-    Ohne diese Angabe liesse sich ``has_baseline`` nur aus dem letzten Fenster
-    ableiten, und ein Segment ohne aktuelle Messung waere nicht von einem ohne
-    Historie zu unterscheiden — die Karte wuerde "hat gerade nichts gemeldet"
-    als "koennen wir grundsaetzlich nicht bewerten" ausgeben.
-    """
+    bekannten Zustand. ``baseline_links`` unterscheidet "hat gerade nichts
+    gemeldet" von "hat keine Historie"."""
     by_id = {w.link_id: w for w in windows}
     out = []
     for s in seed:
@@ -626,8 +478,6 @@ def segments_from(
                 link_id=link_id,
                 link_name=s.get("link_name"),
                 borough=s.get("borough"),
-                # Der Sink aggregiert link_points weg; die Geometrie kommt aus
-                # dem Seed (siehe src/ingestion/enrich_seed_geometry.py).
                 link_points=(w.link_points if w and w.link_points else s.get("link_points")),
                 has_baseline=has_baseline,
                 last_seen=w.window_start if w else None,

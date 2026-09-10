@@ -1,26 +1,4 @@
-"""Einspeisung von UI-Events in die Ingestion (SCRUM-89).
-
-Die Aufgabenstellung verlangt eine UI mindestens in der Rolle des
-Datenlieferanten. Entscheidend ist dabei der Weg: ein hier erzeugtes Event
-geht durch **denselben** Pfad wie eine echte DOT-Messung — Avro gegen die
-Schema-Registry serialisiert, nach ``traffic.speeds.raw``, von dort in den
-Spark-Job und erst ueber Bronze/Silver/Gold zurueck ins Dashboard. Ein
-Seiteneingang, der direkt in die Gold-Schicht schreibt, waere schneller
-sichtbar und wuerde genau das nicht zeigen, worum es geht.
-
-Deshalb wird ``src/ingestion/common.py`` importiert und nicht nachgebaut:
-Serialisierung, Registry-Anbindung und der Bau des ``event_key`` liegen an
-genau einer Stelle. Waere das hier dupliziert, gaebe es zwei Definitionen
-davon, wie ein Event aussieht.
-
-Zwei Betriebsmodi, wie beim Gold-Reader eine Env-Variable statt einer
-Code-Aenderung:
-
-* ``INGEST_MODE=kafka``  — Abgabestand, echter Producer.
-* ``INGEST_MODE=dryrun`` — Entwicklung ohne Kafka. Serialisiert NICHT und
-  stellt NICHT zu, zaehlt nur mit. Jede Antwort traegt den Modus mit, damit
-  ein versehentlich stehengebliebener Dry-Run nicht wie echte Einspeisung
-  aussieht.
+"""Einspeisung von UI-Events in die Ingestion (SCRUM-89)
 """
 
 from __future__ import annotations
@@ -36,9 +14,7 @@ from typing import Any, Callable
 
 log = logging.getLogger("serving.publisher")
 
-# common.py liegt im Repo unter src/ingestion, im Image daneben unter /app
-# (siehe src/serving/Dockerfile). Der Suchpfad deckt beide Faelle ab, ohne
-# dass die Datei kopiert oder ihr Inhalt wiederholt werden muesste.
+# common.py liegt im Repo unter src/ingestion, im Image daneben unter /app.
 _CANDIDATES = [
     pathlib.Path(__file__).resolve().parent,
     pathlib.Path(__file__).resolve().parents[1] / "ingestion",
@@ -50,28 +26,23 @@ for _d in _CANDIDATES:
 
 
 def load_build_event() -> Callable[..., dict]:
-    """``build_event`` aus der Ingestion. Bewusst spaet importiert: common.py
-    zieht confluent_kafka nach, und die Lese-Endpunkte sollen ohne diese
-    Abhaengigkeit starten koennen."""
+    """Spaeter Import: common.py zieht confluent_kafka nach, die
+    Lese-Endpunkte sollen ohne diese Abhaengigkeit starten koennen."""
     from common import build_event
 
     return build_event
 
 
 class IngestError(RuntimeError):
-    """Einspeisung nicht moeglich. Fuehrt zu 503: die API ist in Ordnung,
-    Kafka oder die Schema-Registry sind es nicht."""
+    """Einspeisung nicht moeglich. Fuehrt zu 503."""
 
 
 # ---------------------------------------------------------------------------
 # Szenarien
 # ---------------------------------------------------------------------------
 
-# Warum ueberhaupt Szenarien und nicht nur ein Formular: die Aggregation laeuft
-# ueber 5-Minuten-Fenster. Ein einzelnes Event verschiebt einen Mittelwert aus
-# mehreren Messungen kaum sichtbar — im Dashboard passiert dann scheinbar
-# nichts, obwohl die Kette funktioniert. Eine Folge von Events ueber mehrere
-# Minuten erzeugt den Effekt, den man sehen kann.
+# Ein einzelnes Event verschiebt einen 5-Minuten-Fenstermittelwert kaum
+# sichtbar — Szenarien erzeugen eine Folge von Events ueber mehrere Minuten.
 SCENARIOS: dict[str, dict[str, Any]] = {
     "congestion": {
         "beschreibung": (
@@ -83,8 +54,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     },
     "recovery": {
         "beschreibung": (
-            "Gegenstueck zu congestion: von 30 % zurueck auf den Ausgangswert. "
-            "Der Score faellt, das Segment verlaesst die Rangliste."
+            "Gegenstueck zu congestion: von 30 % zurueck auf den Ausgangswert."
         ),
         "status": 0,
         "speed_factor": lambda p: 0.3 + 0.7 * p,
@@ -92,20 +62,13 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     "sensor_outage": {
         "beschreibung": (
             "Serie mit status=-101 und speed=0 — das Sentinel-Triplett des "
-            "echten Feeds. Der Statusfilter des Spark-Jobs verwirft sie in "
-            "Silver, das Segment bekommt kein neues Fenster und faellt im "
-            "Dashboard auf 'keine aktuelle Messung' zurueck. Sichtbarer "
-            "Beleg dafuer, dass gefiltert wird und nicht 0 mph als Stau "
-            "durchschlaegt."
+            "echten Feeds. Der Statusfilter verwirft sie in Silver."
         ),
         "status": -101,
         "speed_factor": lambda p: 0.0,
     },
 }
 
-# Ausweichwert, wenn fuer das Segment keine Baseline vorliegt (Fixture-Modus
-# oder Zelle ohne Historie). Grob die mittlere Freiflussgeschwindigkeit des
-# Seeds — es geht um eine sichtbare Veraenderung, nicht um Realitaetstreue.
 DEFAULT_REFERENCE_SPEED_MPH = 30.0
 
 
@@ -122,19 +85,11 @@ def scenario_catalog() -> list[dict[str, str]]:
 
 
 class KafkaIngest:
-    """Echte Einspeisung ueber den Producer aus src/ingestion/common.py."""
-
     name = "kafka"
 
     def __init__(self) -> None:
-        # Erst beim ersten Schreibzugriff verbinden: die Lese-Endpunkte
-        # sollen auch dann antworten, wenn Kafka gerade nicht erreichbar ist.
-        # Ein Import auf Modulebene wuerde die ganze API an librdkafka binden.
         self._publisher = None
         self._settings = None
-        # Die POST-Endpunkte laufen im Threadpool von FastAPI. Ohne Sperre
-        # koennten zwei gleichzeitige Anfragen zwei Producer aufbauen, von
-        # denen einer nie geflusht wird.
         self._lock = threading.Lock()
 
     def _ensure(self):
@@ -184,11 +139,7 @@ class KafkaIngest:
 
 
 class DryRunIngest:
-    """Entwicklungsmodus ohne Kafka: zaehlt und protokolliert, stellt nicht zu.
-
-    NICHT der Abgabestand — die Aufgabenstellung verlangt Events, die
-    tatsaechlich durch die Pipeline laufen.
-    """
+    """Entwicklungsmodus ohne Kafka: zaehlt und protokolliert, stellt nicht zu."""
 
     name = "dryrun"
     topic = "(dry-run, kein Topic)"
@@ -213,11 +164,7 @@ class DryRunIngest:
 def build_ingest(mode: str):
     if mode == "kafka":
         return KafkaIngest()
-    log.warning(
-        "INGEST_MODE=%s — Events werden NICHT nach Kafka geschrieben. "
-        "Fuer echten Betrieb INGEST_MODE=kafka setzen.",
-        mode,
-    )
+    log.warning("INGEST_MODE=%s — Events werden NICHT nach Kafka geschrieben.", mode)
     return DryRunIngest()
 
 
@@ -227,14 +174,8 @@ def build_ingest(mode: str):
 
 
 class ScenarioRun:
-    """Zustand eines laufenden oder abgeschlossenen Szenarios.
-
-    Der Zustand liegt im Prozess und wird bewusst nicht geteilt: er ist die
-    Quittung eines Knopfdrucks, kein Betriebszustand. Bei mehreren Repliken
-    kennt ihn nur der Pod, der das Szenario faehrt — deshalb traegt schon die
-    Antwort auf POST den vollstaendigen Plan, damit die UI den Fortschritt
-    ohne Rueckfrage anzeigen kann.
-    """
+    """Zustand eines Szenarios. Lebt im Prozess, wird nicht geteilt — bei
+    mehreren Repliken kennt ihn nur der Pod, der ihn faehrt."""
 
     def __init__(
         self,
@@ -260,10 +201,6 @@ class ScenarioRun:
 
     @property
     def expected_effect_at(self) -> datetime:
-        # Das erste Fenster, in dem der Effekt sichtbar wird: der Sink schiebt
-        # sein Fenster im Minutentakt weiter und triggert alle 30 Sekunden.
-        # Vor Ablauf einer Minute plus Trigger ist im Dashboard nichts zu
-        # sehen, egal wie viele Events geschickt wurden.
         return self.started_at + timedelta(minutes=1, seconds=30)
 
     def as_dict(self) -> dict:
@@ -285,14 +222,8 @@ class ScenarioRun:
 
 
 class ScenarioRunner:
-    """Faehrt Szenarien im Hintergrund und haelt die letzten Laeufe vor.
-
-    Echtzeit statt Rueckdatierung: der Spark-Job verwirft jedes Event, dessen
-    ``data_as_of`` aelter ist als die Watermark (2 Minuten), und schickt es in
-    die DLQ. Ein Szenario, das seine Events mit Zeitstempeln der letzten
-    Viertelstunde auf einen Schlag schickt, kaeme im Dashboard nie an. Also
-    laeuft es so lange, wie es dauert.
-    """
+    """Faehrt Szenarien im Hintergrund, in Echtzeit — rueckdatierte Events
+    wuerden vom Spark-Job als verspaetet ausgefiltert."""
 
     MAX_KEPT = 20
 
@@ -329,22 +260,16 @@ class ScenarioRunner:
 
                 event = self._build_event(
                     link_id=run.link_id,
-                    # Jetzt, nicht rueckdatiert — sonst greift die Watermark.
                     data_as_of=datetime.now(timezone.utc),
                     status=status,
                     speed_mph=speed,
-                    # travel_time_s bleibt leer: die Segmentlaenge ist nicht
-                    # bekannt, ein hergeleiteter Wert waere erfundene Genauig-
-                    # keit. Das Feld ist nullable und wird in Gold nicht
-                    # verwendet.
                     travel_time_s=0 if status != 0 else None,
                     borough=segment.get("borough"),
                     link_name=segment.get("link_name"),
                     link_points=None,
                     source="SYNTHETIC",
                 )
-                # Der Producer ist blockierend; er gehoert nicht in die
-                # Event-Loop, sonst stehen waehrenddessen alle Leseanfragen.
+                # Producer ist blockierend, gehoert nicht in die Event-Loop.
                 await asyncio.to_thread(self.ingest.publish, event)
                 run.published_events += 1
                 if i < run.planned_events - 1:

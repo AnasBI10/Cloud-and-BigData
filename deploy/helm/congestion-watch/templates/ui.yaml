@@ -1,13 +1,10 @@
-# SCRUM-91 — Web-UI. Workload-Typ Deployment (SCRUM-92): statische
-# Auslieferung, kein Zustand, keine Identitaet, kein Volume.
+# SCRUM-91 — Web-UI.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ui-config
   namespace: {{ .Values.namespace }}
 data:
-  # Leer = gleiche Herkunft wie die UI. Der Ingress unten leitet /api auf die
-  # Serving-API, damit steht die API-Adresse nirgends im Image.
   API_BASE_URL: {{ .Values.ui.apiBaseUrl | quote }}
 ---
 apiVersion: apps/v1
@@ -36,9 +33,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: ui-config
-          # Liveness und Readiness sind hier dieselbe Frage: die UI haengt an
-          # keiner Datenquelle. Ob die API antwortet, zeigt sie im Kopf an,
-          # statt sich selbst aus dem Service zu nehmen.
           livenessProbe:
             httpGet: { path: /healthz, port: {{ .Values.ui.port }} }
             initialDelaySeconds: 5
@@ -68,8 +62,6 @@ spec:
       targetPort: {{ .Values.ui.port }}
 {{- if .Values.ui.ingress.enabled }}
 ---
-# UI auf "/", API auf "/api". Gleiche Herkunft, deshalb braucht der Browser
-# kein CORS — das ist der Grund, warum API_BASE_URL leer bleiben kann.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

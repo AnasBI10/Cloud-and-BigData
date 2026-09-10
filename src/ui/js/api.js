@@ -1,11 +1,3 @@
-/* Zugriff auf die Serving-API.
- *
- * Die UI spricht ausschliesslich mit dieser API — nie direkt mit Kafka, Delta
- * oder MinIO. Das ist keine Bequemlichkeit, sondern die Trennung, die den
- * Datenfluss ueberhaupt nachvollziehbar macht: alles, was die UI zeigt, hat
- * die Pipeline durchlaufen.
- */
-
 const base = (window.APP_CONFIG && window.APP_CONFIG.apiBase) || "";
 
 export const apiBase = base;
@@ -23,8 +15,6 @@ async function request(path, options = {}) {
   try {
     response = await fetch(base + path, options);
   } catch (cause) {
-    // Netzwerkfehler haben keinen Status. Ohne diesen Fall stuende in der
-    // Oberflaeche "undefined" statt einer Ursache.
     throw new ApiError("Serving-API nicht erreichbar (" + (base || "gleiche Herkunft") + ")", 0, null);
   }
 
@@ -42,8 +32,7 @@ async function request(path, options = {}) {
   return payload;
 }
 
-/* FastAPI liefert Fehler als {detail: ...}. Bei Validierungsfehlern ist detail
- * eine Liste von Einzelfehlern — die wird hier zu einem lesbaren Satz. */
+// FastAPI liefert Fehler als {detail: ...}; bei Validierungsfehlern ist detail eine Liste.
 function detailOf(payload) {
   if (!payload) return null;
   const detail = payload.detail !== undefined ? payload.detail : payload;
@@ -74,8 +63,6 @@ export const api = {
   scenario: (id) => request(`/api/scenarios/${encodeURIComponent(id)}`),
 };
 
-/* --- gemeinsame Anzeige-Hilfen ------------------------------------------ */
-
 export const nyc = new Intl.DateTimeFormat("de-DE", {
   timeZone: "America/New_York",
   hour: "2-digit",
@@ -86,7 +73,6 @@ export function timeNYC(iso) {
   return iso ? nyc.format(new Date(iso)) + " NYC" : "—";
 }
 
-/** Segmentliste in ein <select>, nach Borough gruppiert. */
 export function fillSegmentSelect(select, segments) {
   select.innerHTML = "";
   const byBorough = new Map();
@@ -108,9 +94,6 @@ export function fillSegmentSelect(select, segments) {
   }
 }
 
-/** Kopfzeile mit dem Zustand der API. Zeigt auch den Einspeisemodus an:
- *  ein versehentlich stehengebliebener Dry-Run darf nicht wie echte
- *  Einspeisung aussehen. */
 export async function showApiStatus(el) {
   try {
     const h = await api.health();

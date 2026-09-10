@@ -1,21 +1,4 @@
-# Baseline-Profil (Erwartungswert und Streuung je link_id x Wochentag x Stunde).
-#
-# Warum ein eigener Workload und nicht Teil des Streaming-Jobs: die Baseline ist
-# ein Batch-Ergebnis ueber die gesamte Silver-Historie, kein Ergebnis des
-# laufenden Fensters. Sie im Stream mitzurechnen hiesse, bei jedem Micro-Batch
-# Wochen von Daten erneut zu aggregieren.
-#
-# Workload-Typ CronJob (SCRUM-92): endlicher Lauf, wiederkehrend, ohne Zustand
-# zwischen den Laeufen — die Tabelle wird jedes Mal vollstaendig ueberschrieben.
-#
-# Die Serving-API liest das Ergebnis unter BASELINE_URI und bildet daraus den
-# congestion_score. Laeuft dieser Job nie, antwortet die API weiterhin, meldet
-# aber jedes Segment als "unbewertbar" statt als "unauffaellig" — das ist der
-# ehrliche Zustand, siehe docs/gold-contract.md.
-#
-# Erster Lauf sofort statt auf den naechsten Slot warten:
-#   kubectl -n {{ .Values.namespace }} create job baseline-initial \
-#     --from=cronjob/baseline-profile
+# Baseline-Profil (Erwartungswert/Streuung je link_id x Wochentag x Stunde)
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -25,8 +8,6 @@ metadata:
     app: baseline-profile
 spec:
   schedule: {{ .Values.processing.baseline.schedule | quote }}
-  # Ein Lauf zur Zeit: zwei parallele Ueberschreibungen derselben Delta-Tabelle
-  # sind ein Commit-Konflikt mit Ansage.
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 2
@@ -39,9 +20,6 @@ spec:
           containers:
             - name: baseline
               image: {{ .Values.processing.image }}
-              # Das Image hat den Streaming-Job als ENTRYPOINT. Fuer den Batch
-              # wird er vollstaendig ersetzt; Kafka- und Avro-Pakete braucht er
-              # nicht, nur Delta und den S3A-Treiber.
               command:
                 - /opt/spark/bin/spark-submit
                 - --master

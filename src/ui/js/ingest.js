@@ -1,18 +1,9 @@
-/* Rolle Datenlieferant (SCRUM-89): Formular und Szenario-Generator.
- *
- * Beides ruft ausschliesslich die Serving-API auf. Die Serialisierung nach
- * Avro, die Schema-Registry und Kafka liegen dahinter — die UI kennt sie
- * nicht und soll sie nicht kennen.
- */
-
 import { api, ApiError, fillSegmentSelect, showApiStatus, timeNYC } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
 
 let segments = [];
 let segmentById = new Map();
-
-/* --- Start -------------------------------------------------------------- */
 
 async function init() {
   showApiStatus($("api-status"));
@@ -32,8 +23,6 @@ async function loadSegments() {
     fillSegmentSelect($("sc-link"), segments);
     updateSegmentContext();
   } catch (err) {
-    // Ohne Segmentliste ist das Formular nicht bedienbar — erfundene IDs
-    // wuerden zwar durch Kafka laufen, aber nie auf der Karte auftauchen.
     for (const id of ["ev-link", "sc-link"]) {
       $(id).innerHTML = '<option value="">— Segmente nicht ladbar —</option>';
       $(id).disabled = true;
@@ -60,13 +49,11 @@ async function loadScenarioCatalog() {
   }
 }
 
-/* --- Einzelnes Event ---------------------------------------------------- */
-
 function updateSegmentContext() {
   const segment = segmentById.get($("ev-link").value);
   const el = $("ev-context");
   if (!segment) {
-    el.textContent = " ";
+    el.textContent = " ";
     return;
   }
   const parts = [`ID ${segment.link_id}`];
@@ -75,8 +62,6 @@ function updateSegmentContext() {
   } else {
     parts.push("keine aktuelle Messung");
   }
-  // Der Unterschied, auf dem die ganze Auswertung steht: ohne Historie ist ein
-  // Segment nicht unauffaellig, sondern unbewertbar.
   parts.push(segment.has_baseline ? "Baseline vorhanden" : "ohne Baseline — unbewertbar");
   el.textContent = parts.join(" · ");
 }
@@ -84,15 +69,11 @@ function updateSegmentContext() {
 function wireEventForm() {
   $("ev-link").addEventListener("change", updateSegmentContext);
 
-  // Regler und Zahlenfeld zeigen denselben Wert.
   const range = $("ev-speed-range");
   const number = $("ev-speed");
   range.addEventListener("input", () => (number.value = range.value));
   number.addEventListener("input", () => (range.value = number.value));
 
-  // Bei einem Sentinel ist die Geschwindigkeit bedeutungslos: der echte Feed
-  // liefert dazu immer 0. Das Feld auszublenden ist ehrlicher, als einen Wert
-  // entgegenzunehmen, den die API anschliessend ueberschreibt.
   for (const radio of document.querySelectorAll('input[name="status"]')) {
     radio.addEventListener("change", () => {
       const sentinel = radio.value === "-101" && radio.checked;
@@ -116,7 +97,6 @@ async function submitEvent(event) {
   if (status === 0) body.speed_mph = Number($("ev-speed").value);
   if ($("ev-travel").value) body.travel_time_s = Number($("ev-travel").value);
   if ($("ev-time").value) {
-    // datetime-local ist zonenlos; die API erwartet UTC.
     body.data_as_of = new Date($("ev-time").value).toISOString();
   }
 
@@ -143,20 +123,17 @@ async function submitEvent(event) {
   }
 }
 
-/* --- Szenario ----------------------------------------------------------- */
-
 function updateScenarioDescription() {
   const option = $("sc-kind").selectedOptions[0];
-  $("sc-desc").textContent = option ? option.dataset.beschreibung : " ";
+  $("sc-desc").textContent = option ? option.dataset.beschreibung : " ";
 }
 
 function updatePlan() {
   const minutes = Number($("sc-minutes").value || 0);
   const rate = Number($("sc-rate").value || 0);
   $("sc-plan").textContent =
-    `${minutes * rate} Events ueber ${minutes} Minuten. Der Lauf laeuft in ` +
-    "Echtzeit; die erste Aenderung kann fruehestens nach etwa eineinhalb " +
-    "Minuten im Dashboard stehen.";
+    `${minutes * rate} Events ueber ${minutes} Minuten. Sichtbar fruehestens nach ` +
+    "etwa eineinhalb Minuten.";
 }
 
 function wireScenarioForm() {
@@ -207,10 +184,7 @@ function renderRun(run, note = "") {
   );
 }
 
-/* Fortschritt nachfuehren. Der Lauf lebt im Prozess des Pods, der ihn
- * gestartet hat — bei mehreren Repliken kann diese Abfrage bei einem anderen
- * Pod landen. Dann wird nicht geraten, sondern gesagt, dass der Fortschritt
- * nicht abfragbar ist. */
+// Fortschritt kann bei mehreren Repliken auf einem anderen Pod landen (404).
 function followRun(run, button) {
   const timer = setInterval(async () => {
     try {
@@ -233,8 +207,6 @@ function followRun(run, button) {
     }
   }, 2000);
 }
-
-/* --- Ausgabe ------------------------------------------------------------ */
 
 function ok(el, html) {
   el.className = "result ok";
