@@ -19,6 +19,17 @@ data:
   DEFAULT_LIMIT: "10"
   MAX_LIMIT: "200"
   LOG_LEVEL: "INFO"
+  # Einspeisung aus der UI (SCRUM-89): echter Producer gegen dieselbe
+  # Schema-Registry wie die Ingestion-Pods.
+  INGEST_MODE: "kafka"
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+  TOPIC: "traffic.speeds.raw"
+  DLQ_TOPIC: "traffic.speeds.dlq"
+  SCHEMA_PATH: "/app/schemas/traffic_speed_event.avsc"
+  WATERMARK_DELAY_S: "120"
+  MAX_SCENARIO_MINUTES: "60"
+  MAX_EVENTS_PER_MINUTE: "60"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -37,6 +48,11 @@ spec:
       labels:
         app: serving-api
     spec:
+      # Kubernetes injiziert fuer jeden Service Umgebungsvariablen (KAFKA_PORT,
+      # SCHEMA_REGISTRY_PORT, ...). Sie kollidieren zwar aktuell mit keinem
+      # unserer Namen, aber die Ingestion ist genau darueber schon einmal
+      # gestolpert — dieselbe Absicherung wie dort.
+      enableServiceLinks: false
       containers:
         - name: serving-api
           image: {{ .Values.serving.image }}

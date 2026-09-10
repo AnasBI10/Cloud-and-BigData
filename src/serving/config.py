@@ -38,6 +38,12 @@ class Settings:
     # --- Stammdaten -------------------------------------------------------
     seed_path: pathlib.Path
 
+    # --- Einspeisung (SCRUM-89) -------------------------------------------
+    ingest_mode: str
+    watermark_delay_s: int
+    max_scenario_minutes: int
+    max_events_per_minute: int
+
     # --- API --------------------------------------------------------------
     default_limit: int
     max_limit: int
@@ -85,6 +91,21 @@ class Settings:
             seed_path=pathlib.Path(
                 os.getenv("SEED_PATH", "/app/data/dot_links_seed.json")
             ),
+            # "kafka" = Abgabestand, "dryrun" = ohne Broker entwickeln.
+            # Anders als beim Gold-Reader ist der Default hier der echte
+            # Betrieb: eine UI, die nur so tut, als speise sie ein, waere
+            # genau das Mockup, das die Aufgabenstellung ausschliesst.
+            ingest_mode=os.getenv("INGEST_MODE", "kafka").lower(),
+            # Muss zu WATERMARK_DELAY in src/processing/streaming_job_bsg.py
+            # passen. Aeltere Events schliesst der Job aus der Aggregation aus
+            # und schickt sie in die DLQ — die API warnt vorher, statt sie
+            # kommentarlos ins Nichts zu schicken.
+            watermark_delay_s=int(os.getenv("WATERMARK_DELAY_S", "120")),
+            # Deckel gegen ein Szenario, das den ganzen Nachmittag laeuft oder
+            # den Broker als Lastgenerator missbraucht — dafuer gibt es den
+            # synthetischen Producer (SCRUM-93).
+            max_scenario_minutes=int(os.getenv("MAX_SCENARIO_MINUTES", "60")),
+            max_events_per_minute=int(os.getenv("MAX_EVENTS_PER_MINUTE", "60")),
             default_limit=int(os.getenv("DEFAULT_LIMIT", "10")),
             # Deckel gegen versehentliche Vollabfragen ueber die Query-Parameter.
             max_limit=int(os.getenv("MAX_LIMIT", "200")),

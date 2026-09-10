@@ -7,3 +7,8 @@ pydantic==2.10.4
 # API-Pod braucht damit keine JVM und keinen Executor, nur einen Reader.
 deltalake==0.24.0
 pyarrow==18.1.0
+
+# Einspeisung von UI-Events (SCRUM-89). Dieselbe Version wie im Producer-Image
+# (src/ingestion/requirements.txt): beide serialisieren gegen dieselbe
+# Schema-Registry, zwei Client-Versionen waeren eine Fehlerquelle ohne Nutzen.
+confluent-kafka[avro,schemaregistry]==2.6.1

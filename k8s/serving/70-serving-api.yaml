@@ -35,6 +35,21 @@ data:
   DEFAULT_LIMIT: "10"
   MAX_LIMIT: "200"
   LOG_LEVEL: "INFO"
+  # --- Einspeisung, Rolle Datenlieferant (SCRUM-89) ---
+  # "kafka" ist der Abgabestand: Events aus der UI gehen denselben Weg wie
+  # echte DOT-Messungen. "dryrun" protokolliert nur und ist Entwicklungsmodus.
+  INGEST_MODE: "kafka"
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+  TOPIC: "traffic.speeds.raw"
+  DLQ_TOPIC: "traffic.speeds.dlq"
+  SCHEMA_PATH: "/app/schemas/traffic_speed_event.avsc"
+  # Muss zu WATERMARK_DELAY im Spark-Job passen (2 Minuten). Aendert sich die
+  # Watermark dort, gehoert dieser Wert mit umgestellt — sonst nimmt die API
+  # Events an, die der Job anschliessend in die DLQ schiebt.
+  WATERMARK_DELAY_S: "120"
+  MAX_SCENARIO_MINUTES: "60"
+  MAX_EVENTS_PER_MINUTE: "60"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -59,7 +74,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: api
-          image: congestion-watch/serving:0.1.0
+          image: congestion-watch/serving:0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

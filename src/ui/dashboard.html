@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NYC Congestion Watch — Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314507a'/><path d='M3 11h10M3 8h7M3 5h4' stroke='white' stroke-width='1.6' stroke-linecap='round'/></svg>">
+  <script src="config.js"></script>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>NYC Congestion Watch</h1>
+    <nav>
+      <a href="index.html">Einspeisung</a>
+      <a href="dashboard.html" class="active">Dashboard</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card">
+    <h2>Noch nicht gebaut</h2>
+    <p class="lead">
+      Karte, Anomalie-Rangliste und Zeitreihen entstehen in SCRUM-90. Die
+      Serving-API liefert die Daten dafuer bereits:
+      <code>/api/segments</code>, <code>/api/anomalies</code> und
+      <code>/api/segments/{link_id}/timeseries</code>.
+    </p>
+    <p><a href="index.html">Zur Einspeisung</a></p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Verkehrsdaten: <a href="https://data.cityofnewyork.us/d/i4gi-tjb9" rel="noopener">NYC Open Data — DOT Traffic Speeds (i4gi-tjb9)</a>,
+      aggregiert auf 5-Minuten-Fenster.
+      Wetterdaten: <a href="https://open-meteo.com/" rel="noopener">Open-Meteo</a>,
+      lizenziert unter <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>.
+    </p>
+    <p class="small">NYC Congestion Watch — studentischer Prototyp, keine Verkehrsauskunft.</p>
+  </div>
+</footer>
+</body>
+</html>
