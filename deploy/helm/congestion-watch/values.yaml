@@ -77,7 +77,7 @@ serving:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.5.1
+  image: congestion-watch/processing:0.6.0
   checkpointStorage: 1Gi
   resources:
     requests: { cpu: 500m, memory: 1Gi }

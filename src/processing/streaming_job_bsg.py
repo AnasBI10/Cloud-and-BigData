@@ -4,7 +4,8 @@ from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.avro.functions import from_avro, to_avro
 from pyspark.sql.functions import (
-    avg, broadcast, coalesce, col, count, current_timestamp, expr, lit, struct, when, window,
+    avg, broadcast, coalesce, col, count, current_timestamp, date_format, dayofweek, expr,
+    first, hour, lit, struct, when, window,
 )
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
@@ -12,6 +13,7 @@ KAFKA_TOPIC_IN = os.environ.get("KAFKA_TOPIC_IN", "traffic.speeds.raw")
 KAFKA_TOPIC_DLQ = os.environ.get("KAFKA_TOPIC_DLQ", "traffic.speeds.dlq")
 SCHEMA_PATH = os.environ.get("SCHEMA_PATH", "/opt/spark-app/schemas/traffic_speed_event.avsc")
 SEED_PATH = os.environ.get("SEED_PATH", "/opt/spark-app/data/dot_links_seed.json")
+BASELINE_TABLE_PATH = os.environ.get("BASELINE_TABLE_PATH", "s3a://gold/baseline_profile")
 CHECKPOINT_BASE = os.environ.get("CHECKPOINT_DIR", "/opt/spark-app/checkpoints")
 
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
@@ -54,6 +56,14 @@ def enrich_with_seed(events: DataFrame, seed: DataFrame) -> DataFrame:
     )
 
 
+def load_baseline(spark: SparkSession) -> DataFrame:
+    """Wird eimalig beim Start geladen und per Broadcast bereitgestellt, nicht jedesmal neu berechnet"""
+    return (
+        spark.read.format("delta").load(BASELINE_TABLE_PATH)
+        .select("link_id", "weekday", "hour_of_day", "baseline_speed", "baseline_stddev")
+    )
+
+
 def build_spark() -> SparkSession:
     return (
         SparkSession.builder
@@ -89,6 +99,7 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
             .format("delta")
             .mode("overwrite")
             .option("mergeSchema", "true")
+            .partitionBy("window_date")
             .save(path)
         )
         return
@@ -106,38 +117,61 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
     )
 
 
-def process_batch(batch_df: DataFrame, batch_id: int) -> None:
-    batch_df.persist()
+def build_process_batch(baseline: DataFrame):
+    """erzeugt process_batch als funktion mit enthaltenem zustand, damit die einmal geladene baseline in jedem batch verfügbar ist"""
 
-    bronze = batch_df.drop("is_late_marker")
-    append_delta(bronze, BRONZE_TABLE_PATH)
+    def process_batch(batch_df: DataFrame, batch_id: int) -> None:
+        batch_df.persist()
 
-    silver = bronze.where(col("status") == 0)
-    append_delta(silver, SILVER_TABLE_PATH)
+        bronze = batch_df.drop("is_late_marker")
+        append_delta(bronze, BRONZE_TABLE_PATH)
 
-    gold_input = batch_df.where(col("status") == 0).where(~col("is_late_marker"))
-    gold_agg = (
-        gold_input
-        .groupBy("window_start", "window_end", "link_id", "borough")
-        .agg(
-            avg("speed_mph").alias("avg_speed_mph"),
-            count("*").alias("sample_count"),
-	)
-	.withColumn(
-		"late_event_detected",
-		lit(False)
+        silver = bronze.where(col("status") == 0)
+        append_delta(silver, SILVER_TABLE_PATH)
+
+        gold_input = batch_df.where(col("status") == 0).where(~col("is_late_marker"))
+        gold_agg = (
+            gold_input
+            .groupBy("window_start", "window_end", "link_id", "borough")
+            .agg(
+                avg("speed_mph").alias("speed_avg"),
+                count("*").alias("sample_count"),
+                first("link_name", ignorenulls=True).alias("link_name"),
+                first("link_points", ignorenulls=True).alias("link_points"),
+            )
+            .withColumn("window_date", date_format(col("window_start"), "yyyy-MM-dd"))
+            # gleiche berechnung wie in compute_baseline.py, auch keine tz konvertierung
+            .withColumn("weekday", dayofweek(col("window_start")))
+            .withColumn("hour_of_day", hour(col("window_start")))
         )
-        .withColumn(
-            "congestion_score",
-            when(col("avg_speed_mph") >= 35, lit(0))
-            .when(col("avg_speed_mph") <= 15, lit(100))
-            .otherwise(((lit(35) - col("avg_speed_mph")) / lit(20) * lit(100)).cast("int")),
-        )
-        .withColumn("updated_at", current_timestamp())
-    )
-    upsert_gold(gold_agg, GOLD_TABLE_PATH)
 
-    batch_df.unpersist()
+        joined = (
+            gold_agg
+            .join(broadcast(baseline), on=["link_id", "weekday", "hour_of_day"], how="left")
+            .drop("weekday", "hour_of_day")
+            # has_baseline erfordert stddev > 0
+            .withColumn(
+                "has_baseline",
+                col("baseline_speed").isNotNull()
+                & col("baseline_stddev").isNotNull()
+                & (col("baseline_stddev") > 0),
+            )
+            .withColumn(
+                "congestion_score",
+                when(
+                    col("has_baseline"),
+                    (col("baseline_speed") - col("speed_avg")) / col("baseline_stddev"),
+                ),
+                # kein .otherwise(): bleibt NULL ohne Baseline, wie im Gold-Contract steht
+            )
+            .withColumn("late_event_detected", lit(False))
+            .withColumn("updated_at", current_timestamp())
+        )
+        upsert_gold(joined, GOLD_TABLE_PATH)
+
+        batch_df.unpersist()
+
+    return process_batch
 
 
 def main() -> None:
@@ -169,6 +203,8 @@ def main() -> None:
     seed = load_seed(spark)
     enriched = enrich_with_seed(decoded, seed)
 
+    baseline = load_baseline(spark)
+
     late_cutoff = expr(f"current_timestamp() - interval {WATERMARK_DELAY}")
     tagged = enriched.withColumn("is_late", col("event_time") < late_cutoff)
 
@@ -187,7 +223,7 @@ def main() -> None:
 
     query = (
         windowed.writeStream
-        .foreachBatch(process_batch)
+        .foreachBatch(build_process_batch(baseline))
         .option("checkpointLocation", f"{CHECKPOINT_BASE}/bronze-silver-gold")
         .outputMode("append")
         .trigger(processingTime="30 seconds")
