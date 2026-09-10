@@ -74,3 +74,45 @@ wurden zwei Kubernetes CronJobs eingerichtet:
 Damit können kleine Dateien periodisch
 kompaktiert und veraltete Versionen bereinigt
 werden.
+
+
+
+Speicherformat und Partitionierung im Data Lake (SCRUM-87)
+Dateiformat
+
+Alle Tabellen (Bronze, Silver, Gold, Baseline) werden als Delta Lake in MinIO geschrieben, physisch Parquet-Dateien plus Transaktionslog. Die Grundsatzentscheidung Delta vs. reines Parquet ist in "docs/technische-abweichungen" begründet. Für diese Pipeline zusätzlich relevant:
+
+- Der Streaming-Sink committet alle 30 s. Durch ACID-Transaktionen liest die Serving-API (delta-rs) immer nur vollständig committete Stände, nie einen halb geschriebenen Micro-Batch.
+- Die Gold-Tabelle wird per "MERGE" auf "(link_id, window_start)" aktualisiert. Das ist mit reinem Parquet nicht möglich.
+- Parquet ist spaltenorientiert: Die Leser projizieren nur die benötigten Spalten ("SINK_COLUMNS" in "readers.py"), es werden nur diese Spalten gelesen.
+
+Kompression: Snappy, der Spark/Delta-Standard (nicht explizit konfiguriert). Snappy ist sehr CPU-schonend, was bei einem Commit alle 30 s wichtiger ist als die maximale Kompressionsrate. zstd würde besser komprimieren, bei dem geringen absoluten Datenvolumen ist der Unterschied aber klein. Falls der Speicher auf dem MinIO-PVC knapp wird, ist zstd die naheliegende Alternative.
+
+Partitionierung
+
+| Tabelle  |             Pfad                    |        Partitionsspalte      |
+| Bronze   | "s3a://bronze/traffic_speeds_raw"   |            keine             |
+| Silver   | "s3a://bronze/traffic_speeds_valid" |            keine             |
+| Gold     | "s3a://gold/congestion_scores"      | "window_date" ("yyyy-MM-dd") |
+| Baseline | "s3a://gold/baseline_profile"       |            keine             |
+
+Grundsatz: Partitionierung lohnt sich erst bei großen Tabellen (Databricks empfiehlt sie erst ab ca. 1 TB), bei kleinen Tabellen erzeugt sie vor allem zusätzliche kleine Dateien. Delta speichert außerdem Min/Max-Statistiken pro Datei, sodass Filter auch ohne Partitionen Dateien überspringen können (Data Skipping). Wir partitionieren daher nur dort, wo das Lesemuster es klar rechtfertigt.
+
+Gold nach "window_date" (bewusste Ausnahme): Die Partitionsspalte folgt dem Lesezugriff. Die Serving-API fragt immer ein Zeitfenster ab ("window_start >= since") und filtert zusätzlich auf "window_date >= since". Dadurch liest delta-rs nur die Verzeichnisse der betroffenen Tage (Partition Pruning). Das gilt auch für die Zeitreihe eines einzelnen Segments, da diese ebenfalls zeitlich eingeschränkt wird. Gold ist die Tabelle, die das Dashboard bei jeder Aktualisierung liest und die mit der Laufzeit unbegrenzt wächst. Zusätzlich lassen sich alte Daten tageweise als ganze Partition entfernen.
+
+Tagesgranularität ergibt ein Verzeichnis pro Tag mit bis zu ~180.000 Zeilen (125 Segmente × 1.440 Fensterstarts pro Tag bei 5-Minuten-Fenstern mit 1-Minuten-Schritt). Stundenpartitionen würden 24-mal mehr Verzeichnisse mit entsprechend weniger Daten erzeugen. "window_date" ist ein String im ISO-Format: Die lexikografische Sortierung entspricht der chronologischen, der Vergleich im Reader ist daher korrekt.
+
+Warum nicht "link_id": Jeder 30-s-Micro-Batch enthält Daten vieler Segmente. Eine Partitionierung nach "link_id" würde jeden Commit auf bis zu 125 Verzeichnisse verteilen und die Zahl kleiner Dateien vervielfachen. Der Hauptzugriff ist zeitbasiert, nicht segmentbasiert.
+
+Bronze, Silver und Baseline unpartitioniert:
+- Silver wird nur von "compute_baseline.py" gelesen. Der Job aggregiert die gesamte Historie je "(link_id, Wochentag, Stunde)" ohne Filter, Partition Pruning hätte bei diesem Zugriffsmuster keinen Effekt.
+- Bronze ist ein reines Append-Archiv der Rohdaten ohne Leser im Normalbetrieb.
+- Die Baseline umfasst höchstens 125 × 7 × 24 = 21.000 Zeilen und wird komplett gelesen und überschrieben.
+- Silver liegt als eigenes Präfix im Bucket "bronze". Die Schichten werden über den Pfad getrennt, nicht über die Partitionierung.
+
+Bekannte Einschränkungen
+
+- Die Partitionierung wird nur beim Anlegen der Gold-Tabelle gesetzt ("streaming_job_bsg.py", Zweig "not isDeltaTable"). Eine vorher angelegte Tabelle bleibt unpartitioniert und muss neu erstellt werden.
+- Die "MERGE"-Bedingung enthält "window_date" nicht. Partition Pruning wirkt daher nur beim Lesen, nicht beim Schreiben.
+- "compute_baseline.py" liest Silver vollständig, die Laufzeit wächst mit der Historie. Würde der Job auf ein festes Zeitfenster (z. B. die letzten Wochen) begrenzt, wäre eine Datumspartitionierung von Silver sinnvoll.
+- Der 30-s-Trigger erzeugt viele kleine Dateien. Kompaktierung (OPTIMIZE/VACUUM) ist nicht Teil dieses Tickets.
