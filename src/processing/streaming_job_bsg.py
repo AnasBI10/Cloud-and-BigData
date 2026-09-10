@@ -122,6 +122,10 @@ def process_batch(batch_df: DataFrame, batch_id: int) -> None:
         .agg(
             avg("speed_mph").alias("avg_speed_mph"),
             count("*").alias("sample_count"),
+	)
+	.withColumn(
+		"late_event_detected",
+		lit(False)
         )
         .withColumn(
             "congestion_score",
