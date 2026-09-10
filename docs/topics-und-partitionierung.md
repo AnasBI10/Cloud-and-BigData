@@ -64,3 +64,13 @@ nachvollziehbar.
 | Producer (live) | StatefulSet | Stabile Identitaet fuer zukuenftige Erweiterung um Offset-Tracking je Instanz |
 | Processing (Spark) | Deployment | Checkpoint liegt extern auf PVC, der Pod selbst ist austauschbar |
 | Serving-API | Deployment | Zustandslos, liest nur aus MinIO/Kafka, mehrere Replicas hinter einem Service |
+## SCRUM-88 Schema-Evolution und Kompaktierung
+Schema-Evolution wird durch Delta Lake mit
+`mergeSchema=true` unterstützt.
+Für die langfristige Pflege der Delta-Tabellen
+wurden zwei Kubernetes CronJobs eingerichtet:
+- delta-optimize
+- delta-vacuum
+Damit können kleine Dateien periodisch
+kompaktiert und veraltete Versionen bereinigt
+werden.
