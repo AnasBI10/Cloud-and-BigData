@@ -49,12 +49,32 @@ Silver-Schicht, jeder Lauf ueberschreibt vollstaendig.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
+<<<<<<< HEAD
 | `link_id` | string | Segment-ID |
 | `weekday` | int | Wochentag in Sparks `dayofweek`-Zaehlung: **1 = Sonntag**, 7 = Samstag |
 | `hour_of_day` | int | Stunde 0–23 |
 | `baseline_speed` | double | Mittelwert der Zelle |
 | `baseline_stddev` | double, nullable | Streuung der Zelle |
 | `sample_count` | bigint | Messungen in der Zelle, `>= 5` (`MIN_SAMPLES_PER_CELL`) |
+=======
+| `link_id` | string | Segment-ID aus dem DOT-Feed |
+| `window_start` | timestamp (UTC) | Beginn des Aggregationsfensters |
+| `window_end` | timestamp (UTC) | Ende des Aggregationsfensters |
+| `window_date` | string `YYYY-MM-DD` | **Partitionsspalte**, abgeleitet aus `window_start` |
+| `speed_avg` | double | Mittlere Geschwindigkeit im Fenster (mph), nur aus `status = 0` |
+| `sample_count` | int | Anzahl gueltiger Messungen im Fenster |
+| `baseline_speed` | double, nullable | Erwartungswert aus der Baseline |
+| `baseline_stddev` | double, nullable | Streuung der Baseline-Zelle |
+| `congestion_score` | double, nullable | Standardisierte Abweichung, siehe unten |
+| `has_baseline` | boolean | `false` fuer Segmente ohne ausreichende Historie |
+| `borough` | string, nullable | Join-Schluessel Wetter |
+| `link_name` | string, nullable | Klartext fuer die Anzeige |
+| `link_points` | string, nullable | Polylinie fuer die Karte |
+| `weather_condition` | string, nullable | Wetterlage aus dem Enrichment-Join |
+| `temperature_c` | double, nullable | Temperatur zum Fensterzeitpunkt |
+| `precipitation_mm` | double, nullable | Niederschlag zum Fensterzeitpunkt |
+| `is_late_arrival` | boolean | `true`, wenn das Fenster durch verspaetete Events korrigiert wurde. **Stand 10.09.:** Namens-Mismatch zu `late_event_detected` (SCRUM-86) behoben, Spalte heisst jetzt `is_late_arrival`. Bleibt aber bewusst `false` (Platzhalter) — als "late" markierte Events werden komplett aus Gold ausgeschlossen und landen nur in der DLQ, die Late-Data-Strategie ist darüber sichtbar. Echte pro-Fenster-Markierung ist ein separater, spaeterer Schritt (haengt an einer MERGE-Eigenheit in `upsert_gold()`, siehe Code-Kommentar). |
+>>>>>>> 5f9b890 (namens fix in bezug auf gold contract: is_late_arrival statt late_event_detected)
 
 ## Was die API aus beidem macht
 

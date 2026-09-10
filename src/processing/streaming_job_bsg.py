@@ -164,7 +164,9 @@ def build_process_batch(baseline: DataFrame):
                 ),
                 # kein .otherwise(): bleibt NULL ohne Baseline, wie im Gold-Contract steht
             )
-            .withColumn("late_event_detected", lit(False))
+            # Umbenannt von late_event_detected (SCRUM-86) auf den Contract-Namen
+            # is_late_arrival. 
+            .withColumn("is_late_arrival", lit(False))
             .withColumn("updated_at", current_timestamp())
         )
         upsert_gold(joined, GOLD_TABLE_PATH)
