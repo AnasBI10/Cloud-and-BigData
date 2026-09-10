@@ -266,18 +266,21 @@ class FixtureReader:
 class BaselineIndex:
     """Erwartungswert und Streuung je ``link_id`` x Wochentag x Stunde.
 
-    Der Gold-Sink (SCRUM-86) schreibt keine Baseline mit — er kennt nur die
-    Absolutgeschwindigkeit des Fensters. Die Historie liegt in einer zweiten
-    Tabelle, die ``src/processing/compute_baseline.py`` als Batch aus der
-    Silver-Schicht berechnet. Die API verbindet beide.
+    Den Score bildet seit SCRUM-83 der Streaming-Job. Die API liest dieselbe
+    Tabelle trotzdem, aber fuer zwei Fragen, die in der Gold-Tabelle nicht
+    stehen, weil dort nur Segmente auftauchen, die gerade gemeldet haben:
 
-    Damit bleibt die Aussage erhalten, auf der das Dashboard steht: ein
-    Segment ist erst dann auffaellig, wenn es gemessen an SEINER eigenen
-    Historie langsam ist, nicht wenn es absolut langsam ist. Der Lincoln
-    Tunnel faehrt immer 20 mph — das ist kein Stau, das ist Dienstag.
+    * ``links()`` — welche Segmente sind ueberhaupt bewertbar? Die Karte
+      zeichnet alle 125, auch die ohne aktuelle Messung. Ohne diese Auskunft
+      saehe "hat gerade nichts gesendet" aus wie "hat keine Historie".
+    * ``lookup()`` — welche Geschwindigkeit ist fuer dieses Segment zu dieser
+      Stunde ueblich? Grundlage des Szenario-Generators (SCRUM-89).
 
-    Fehlt die Tabelle, ist der Index leer. Dann ist ``has_baseline`` ueberall
-    ``false``: unbewertbar, nicht unauffaellig. Kein Grund fuer einen 503.
+    Beides liest dieselbe Quelle wie der Spark-Job, es entsteht also keine
+    zweite Score-Definition.
+
+    Fehlt die Tabelle, ist der Index leer. Dann gilt jedes Segment als
+    unbewertbar — kein Grund fuer einen 503.
     """
 
     def __init__(self, settings: Settings):
@@ -363,6 +366,10 @@ class BaselineIndex:
         return {link_id for link_id, _, _ in self._cache.get(self._load)}
 
 
+def _round(value, digits: int = 2) -> float | None:
+    return round(float(value), digits) if value is not None else None
+
+
 def _as_utc(ts: datetime) -> datetime:
     """Delta liefert je nach Schreiber tz-behaftete oder naive Zeitstempel.
     Der Vertrag sagt UTC — naive Werte werden entsprechend gelesen."""
@@ -377,36 +384,48 @@ def _as_utc(ts: datetime) -> datetime:
 
 
 class DeltaReader:
-    """Liest die Gold-Tabelle von MinIO (SCRUM-86) und verbindet sie mit der
-    Baseline (compute_baseline.py).
+    """Liest die Gold-Tabelle von MinIO.
 
     Bewusst ohne Spark: delta-rs liest das Transaktionslog nativ, der Pod
     bleibt bei ~200 MB statt ~1,5 GB. Das ist auch der Grund, warum die
     Serving-Schicht unabhaengig vom Spark-Job skaliert (SCRUM-93).
 
-    Die Spaltennamen des Sinks sind NICHT die des Vertrags. Die Abbildung
-    steht in ``SINK_COLUMNS`` und ist die einzige Stelle, die beides kennt —
-    Abweichungen und ihr Stand sind in docs/gold-contract.md protokolliert.
+    Seit SCRUM-83 schreibt der Streaming-Job den Baseline-Join und den
+    z-Score selbst. Die API rechnet deshalb nichts mehr aus, sie liest die
+    Spalten so, wie sie im Vertrag stehen. ``BaselineIndex`` bleibt fuer die
+    zwei Fragen, die die Gold-Tabelle nicht beantwortet — welche Segmente
+    ueberhaupt bewertbar sind und mit welcher Geschwindigkeit ein Szenario
+    startet (siehe docs/gold-contract.md).
     """
 
     name = "delta"
 
-    # Vertragsname (models.SegmentWindow) -> Spalte, wie der Sink sie schreibt
-    # (src/processing/streaming_job_bsg.py, Funktion process_batch).
+    # Vertragsname (models.SegmentWindow) -> Spalte im Sink. Seit der
+    # Umbenennung in 5f9b890 stimmen beide ueberein; die Abbildung bleibt als
+    # die eine Stelle bestehen, an der eine kuenftige Abweichung eingetragen
+    # wird, statt sie ueber den Reader zu verteilen.
     SINK_COLUMNS = {
         "link_id": "link_id",
         "window_start": "window_start",
         "window_end": "window_end",
-        "speed_avg": "avg_speed_mph",
+        "speed_avg": "speed_avg",
         "sample_count": "sample_count",
-        "speed_index": "congestion_score",
+        "baseline_speed": "baseline_speed",
+        "baseline_stddev": "baseline_stddev",
+        "congestion_score": "congestion_score",
+        "has_baseline": "has_baseline",
         "borough": "borough",
-        "is_late_arrival": "late_event_detected",
+        "link_name": "link_name",
+        "link_points": "link_points",
+        "weather_condition": "weather_condition",
+        "temperature_c": "temperature_c",
+        "precipitation_mm": "precipitation_mm",
+        "is_late_arrival": "is_late_arrival",
     }
 
     # Pflichtspalten. Fehlt eine davon, passt die Tabelle nicht zum Vertrag
     # und ein stiller Teil-Erfolg waere schlimmer als ein klarer Fehler.
-    REQUIRED = ("link_id", "window_start", "window_end", "avg_speed_mph")
+    REQUIRED = ("link_id", "window_start", "window_end", "speed_avg")
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -477,45 +496,31 @@ class DeltaReader:
         return table.to_pylist()
 
     def _to_model(self, row: dict) -> SegmentWindow:
-        """Sink-Zeile plus Baseline-Zelle -> Vertragsobjekt.
+        """Sink-Zeile -> Vertragsobjekt.
 
-        Der Score des Sinks (0-100 aus der Absolutgeschwindigkeit) wandert
-        unveraendert nach ``speed_index``. ``congestion_score`` ist die
-        standardisierte Abweichung des Vertrags und bleibt ``null``, wenn es
-        fuer diese Zelle keine Historie gibt.
+        Ohne Umrechnung: ``congestion_score`` und ``has_baseline`` kommen
+        seit SCRUM-83 fertig aus dem Job. Sie hier ein zweites Mal zu bilden
+        hiesse, zwei Definitionen desselben Werts zu pflegen — und die erste
+        Abweichung faende niemand.
         """
-        link_id = row["link_id"]
-        window_start = _as_utc(row["window_start"])
         speed = row.get("speed_avg")
-        speed = float(speed) if speed is not None else None
-
-        baseline = self.baseline.lookup(link_id, window_start)
-        score = None
-        expected = stddev = None
-        if baseline is not None:
-            expected, stddev = baseline
-            if speed is not None:
-                score = round((expected - speed) / stddev, 2)
-
+        score = row.get("congestion_score")
         return SegmentWindow(
-            link_id=link_id,
-            window_start=window_start,
+            link_id=row["link_id"],
+            window_start=_as_utc(row["window_start"]),
             window_end=_as_utc(row["window_end"]),
-            speed_avg=round(speed, 2) if speed is not None else None,
+            speed_avg=round(float(speed), 2) if speed is not None else None,
             sample_count=int(row.get("sample_count") or 0),
-            baseline_speed=round(expected, 2) if expected is not None else None,
-            baseline_stddev=round(stddev, 2) if stddev is not None else None,
-            congestion_score=score,
-            has_baseline=baseline is not None,
-            speed_index=(
-                float(row["speed_index"]) if row.get("speed_index") is not None else None
-            ),
+            baseline_speed=_round(row.get("baseline_speed")),
+            baseline_stddev=_round(row.get("baseline_stddev")),
+            congestion_score=round(float(score), 2) if score is not None else None,
+            has_baseline=bool(row.get("has_baseline")),
             borough=row.get("borough"),
-            # link_name und link_points aggregiert der Sink nicht mit. Beide
-            # kommen fuer die Anzeige aus dem Seed (readers.segments_from,
-            # main.timeseries), deshalb hier bewusst leer statt geraten.
-            link_name=None,
-            link_points=None,
+            link_name=row.get("link_name"),
+            link_points=row.get("link_points"),
+            weather_condition=row.get("weather_condition"),
+            temperature_c=_round(row.get("temperature_c")),
+            precipitation_mm=_round(row.get("precipitation_mm")),
             is_late_arrival=bool(row.get("is_late_arrival") or False),
         )
 

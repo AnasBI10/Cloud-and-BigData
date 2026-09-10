@@ -28,19 +28,8 @@ class SegmentWindow(BaseModel):
         None,
         description=(
             "(baseline_speed - speed_avg) / baseline_stddev. "
-            "Positiv = langsamer als erwartet. Wird von der API aus der "
-            "Baseline-Tabelle berechnet, weil der Gold-Sink keine Baseline "
-            "mitschreibt (siehe docs/gold-contract.md)."
-        ),
-    )
-    speed_index: float | None = Field(
-        None,
-        description=(
-            "Der Score, den der Spark-Job selbst in die Gold-Tabelle schreibt: "
-            "0-100 allein aus der Absolutgeschwindigkeit, ohne Baseline. "
-            "Unveraendert durchgereicht, damit nichts stillschweigend "
-            "umgedeutet wird. Fuer die Anomalie-Rangliste zaehlt "
-            "congestion_score, nicht dieser Wert."
+            "Positiv = langsamer als erwartet. Wird vom Streaming-Job "
+            "berechnet und hier unveraendert gelesen; null ohne Baseline."
         ),
     )
     has_baseline: bool = Field(

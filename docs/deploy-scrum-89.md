@@ -4,8 +4,9 @@ Schritt-für-Schritt, um den geänderten Stand auf den k3s-Cluster zu bringen un
 zu prüfen, dass ein über die UI erzeugtes Event **wirklich** durch die Pipeline
 läuft (Kafka → Spark → Gold → API). Erst danach ist SCRUM-89 abnahmefähig.
 
-> Noch **nicht committet**. Wenn der Test einen Fehler zeigt, wird im
-> Arbeitsverzeichnis nachgebessert, nicht im Cluster.
+> Stand: committet auf `dev`, aber **nicht gepusht** und nicht am Cluster
+> verifiziert. Zeigt der Test einen Fehler, wird im Arbeitsverzeichnis
+> nachgebessert, nicht im Cluster.
 
 ## Wer macht was
 
@@ -21,8 +22,10 @@ läuft (Kafka → Spark → Gold → API). Erst danach ist SCRUM-89 abnahmefähi
 
 ## Was sich geändert hat
 
-- `src/serving/` — neuer `publisher.py`, zwei POST-Endpunkte, Reader liest jetzt
-  das echte Gold-Schema + die Baseline-Tabelle.
+- `src/serving/` — neuer `publisher.py`, zwei POST-Endpunkte, Reader liest das
+  Gold-Schema nach SCRUM-83 (Score und `has_baseline` kommen fertig aus dem
+  Job, die Baseline-Tabelle nur noch für Kartenzustand und Szenario-Startwert).
+- `src/ui/` — dazu das Dashboard aus SCRUM-90 (Karte, Rangliste, Zeitreihe).
 - `src/serving/Dockerfile` — kopiert zusätzlich `src/ingestion/common.py` und das
   Avro-Schema ins Image (Build-Kontext bleibt Repo-Root).
 - `deploy/helm/.../serving.yaml` — ConfigMap um `GOLD_READER=delta`, `INGEST_MODE=kafka`
@@ -33,10 +36,16 @@ läuft (Kafka → Spark → Gold → API). Erst danach ist SCRUM-89 abnahmefähi
 - `src/ui/` — Formular + Szenario-Generator (Containerisierung ist SCRUM-91,
   hier läuft die UI noch lokal).
 
-Das `processing`-Image (`0.5.1`) ändert sich **nicht** — `compute_baseline.py`
-liegt dort schon drin.
+Seit dem Merge mit `origin/dev` kommt **das Processing-Image mit dazu**:
+Victor hat den Baseline-Join in den Streaming-Job gezogen (SCRUM-83), das Image
+steht in `values.yaml` jetzt auf `congestion-watch/processing:0.6.0`. Es muss
+also ebenfalls gebaut und importiert werden — dieselben Schritte wie für die
+Serving-API, nur mit `-f src/processing/Dockerfile` und dem anderen Tag.
 
----
+**Neue Reihenfolge-Abhängigkeit:** `streaming_job_bsg.py` lädt
+`s3a://gold/baseline_profile` beim Start und broadcastet sie. Existiert die
+Tabelle noch nicht, startet der Job nicht. **Teil D muss deshalb vor dem
+Neustart des Streaming-Jobs laufen**, beim Erstaufbau einmal von Hand.
 
 ---
 
@@ -45,6 +54,9 @@ liegt dort schon drin.
 Alles läuft über die DHBW-Cloud (OpenStack). Der k3s-Node ist `ny-traffic-master`
 (intern `192.168.10.53`), erreichbar über VPN / DHBW-Netz. Der geänderte Stand
 ist **nicht committet**, muss also als Dateien auf den Node.
+
+Da der Stand committet, aber noch nicht gepusht ist, geht der Transport
+weiterhin über ein Archiv statt über `git pull` auf dem Node.
 
 **Auf deinem Rechner**, im Repo-Wurzelverzeichnis:
 
@@ -219,7 +231,8 @@ Häufigste Ursachen:
 
 ## Teil D — Baseline einmalig erzeugen
 
-Der CronJob läuft alle 6 Stunden. Für den Test sofort einen Lauf anstoßen:
+**Vor** dem Rollout des Streaming-Jobs, nicht danach: er lädt die Tabelle beim
+Start und kommt ohne sie nicht hoch. Der CronJob läuft sonst alle 6 Stunden.
 
 ```bash
 sudo k3s kubectl -n bigdata create job baseline-initial --from=cronjob/baseline-profile
