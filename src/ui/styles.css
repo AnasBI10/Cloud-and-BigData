@@ -151,3 +151,159 @@ footer {
 footer p { margin: 0 0 4px; }
 footer a { color: var(--accent); }
 footer .small { font-size: 12px; }
+
+/* ==========================================================================
+   Dashboard (SCRUM-90)
+   ========================================================================== */
+
+/* Farbskala fuer den congestion_score. Sequenziell von "schneller als
+   erwartet" bis "stark auffaellig" — und daneben zwei Zustaende, die
+   BEWUSST nicht Teil dieser Skala sind:
+     --st-stale   keine aktuelle Messung  (grau, duenn)
+     --st-nobase  unbewertbar             (violett, gestrichelt)
+   Gestrichelt und in anderer Farbfamilie, damit "wissen wir nicht" nicht
+   wie ein Wert auf der Skala aussieht. */
+:root {
+  --st-neg: #2b7bba;
+  --st-0: #2e7d4f;
+  --st-1: #c9a227;
+  --st-2: #e07a1f;
+  --st-3: #b3261e;
+  --st-stale: #b8c0c8;
+  --st-nobase: #7a5ea8;
+}
+
+.dash-head { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+.dash-head .lead { margin-bottom: 6px; }
+.dash-head .hint { margin: 0; white-space: nowrap; }
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } }
+
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.card-head h2 { margin: 0; }
+.card-head .hint { margin: 0; text-align: right; }
+select.mini { font-size: 12px; padding: 4px 7px; }
+.mini-row { margin: 0; }
+
+/* --- Karte --------------------------------------------------------------- */
+
+#map-wrap { position: relative; background: #eef1f4; border-radius: 8px; overflow: hidden; }
+#map { display: block; width: 100%; height: auto; }
+
+.seg {
+  fill: none;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  cursor: pointer;
+  transition: stroke-width 0.12s;
+}
+.seg:hover { stroke-width: 6; }
+.seg.is-selected { stroke-width: 6.5; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.45)); }
+
+.st-sneg { stroke: var(--st-neg); }
+.st-s0 { stroke: var(--st-0); }
+.st-s1 { stroke: var(--st-1); }
+.st-s2 { stroke: var(--st-2); }
+.st-s3 { stroke: var(--st-3); }
+.st-stale { stroke: var(--st-stale); stroke-width: 2; }
+.st-nobase { stroke: var(--st-nobase); stroke-dasharray: 5 4; stroke-width: 2.5; }
+
+.map-empty { fill: var(--muted); font-size: 15px; }
+
+.tip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(27, 31, 36, 0.94);
+  color: #fff;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 240px;
+  z-index: 5;
+}
+.tip strong { display: block; }
+.tip span { display: block; color: #c9d2da; }
+
+/* --- Legende ------------------------------------------------------------- */
+
+.legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 0;
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.legend li { display: flex; align-items: center; gap: 6px; }
+.legend .sw { width: 20px; height: 0; border-top: 3.5px solid var(--line); border-radius: 2px; }
+.sw.s-neg { border-color: var(--st-neg); }
+.sw.s-0 { border-color: var(--st-0); }
+.sw.s-1 { border-color: var(--st-1); }
+.sw.s-2 { border-color: var(--st-2); }
+.sw.s-3 { border-color: var(--st-3); }
+.sw.s-stale { border-color: var(--st-stale); border-top-width: 2px; }
+.sw.s-nobase { border-color: var(--st-nobase); border-top-style: dashed; }
+.sw.c-speed { border-color: var(--accent); }
+.sw.c-base { border-color: #6b7885; border-top-style: dashed; }
+.sw.c-band { border-top: none; height: 10px; background: rgba(107, 120, 133, 0.22); border-radius: 2px; }
+.legend-note { margin: 8px 0 0; max-width: 66ch; }
+/* In der Legende steht code inline im Fliesstext — ohne das eigene Padding,
+   sonst reisst es die Zeile auseinander. */
+.legend code { background: none; padding: 0; }
+
+/* --- Rangliste ----------------------------------------------------------- */
+
+.rank { list-style: none; margin: 0; padding: 0; }
+.rank-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.rank-item:last-child { border-bottom: none; }
+.rank-item:hover { background: #f0f3f6; }
+.rank-item.is-selected { background: #e4edf4; }
+.rank-item .score {
+  min-width: 46px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 4px 0;
+  border-radius: 6px;
+  color: #fff;
+}
+.rank-item .score small { font-size: 10px; font-weight: 500; opacity: 0.85; }
+.score.st-s1 { background: var(--st-1); }
+.score.st-s2 { background: var(--st-2); }
+.score.st-s3 { background: var(--st-3); }
+.score.st-s0, .score.st-sneg { background: var(--st-0); }
+.rank-body { display: flex; flex-direction: column; min-width: 0; }
+.rank-body strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-body small { font-size: 12px; color: var(--muted); }
+.rank-empty { padding: 14px 4px; color: var(--muted); font-size: 13px; }
+
+/* --- Zeitreihe ----------------------------------------------------------- */
+
+.chart-card { margin-top: 20px; }
+#chart-wrap { background: #fbfcfd; border: 1px solid var(--line); border-radius: 8px; }
+#chart { display: block; width: 100%; height: 320px; }
+
+.grid { stroke: #e3e8ed; stroke-width: 1; }
+.axis { fill: var(--muted); font-size: 11px; }
+.band { fill: rgba(107, 120, 133, 0.18); stroke: none; }
+.line-base { fill: none; stroke: #6b7885; stroke-width: 1.6; stroke-dasharray: 5 4; }
+.line-speed { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linejoin: round; }
+.dot-speed { fill: var(--accent); }

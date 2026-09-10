@@ -237,7 +237,14 @@ def segments() -> SegmentsResponse:
         # Die Karte soll auch ohne Gold-Daten zeichnen koennen — dann eben
         # ohne Farbe. Ein leeres Dashboard ist schlechter als ein graues.
         windows = []
-    items = segments_from(state["seed"], windows)
+    # has_baseline kommt aus der Baseline-Tabelle, nicht aus dem letzten
+    # Fenster: sonst sieht ein Segment ohne aktuelle Messung aus wie eines
+    # ohne Historie.
+    try:
+        baseline_links = state["reader"].baseline_links()
+    except ReaderError:
+        baseline_links = None
+    items = segments_from(state["seed"], windows, baseline_links)
     return SegmentsResponse(
         generated_at=datetime.now(timezone.utc), count=len(items), items=items
     )

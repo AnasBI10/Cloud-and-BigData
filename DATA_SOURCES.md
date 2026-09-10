@@ -156,6 +156,32 @@ eine Standardabweichung aus zu wenigen Werten nicht aussagekräftig ist.
 
 **Ablage:** `s3a://gold/baseline_profile` (Delta), MinIO, siehe SCRUM-78.
 
+### Segmentgeometrie im Seed (SCRUM-90)
+
+**Abgerufen:** 10.09.2026 aus `i4gi-tjb9`, Feld `link_points`, für alle 125
+`link_id` des Seeds vollständig vorhanden.
+
+**Vorgenommene Änderung an den Rohdaten** (Angabepflicht nach Local Law 11,
+§ 23-502 d): `data/dot_links_seed.json` wurde um das Feld `link_points`
+ergänzt. Die Koordinaten wurden dabei
+
+* auf sechs Nachkommastellen gerundet (rund 0,1 m Auflösung, mehr gibt der
+  Feed nicht her),
+* auf den Bereich 40,3–41,1 N / −74,4–−73,5 E gefiltert; vereinzelte
+  Ausreißer und abgeschnittene Koordinatenpaare des Feeds hätten die Karte
+  sonst unlesbar aufgezogen,
+* verworfen, wo weniger als zwei gültige Punkte übrig blieben (ein einzelner
+  Punkt ist keine Strecke).
+
+Reproduzierbar über `src/ingestion/enrich_seed_geometry.py`. Die Geometrie ist
+eine Stammdatenangabe und wird bewusst nicht bei jedem Start live abgerufen —
+das wäre eine Fremdabhängigkeit ohne Gegenwert.
+
+**Warum im Seed und nicht in der Pipeline:** Der Gold-Sink gruppiert je Fenster
+und Segment und aggregiert `link_points` dabei weg. Die Serving-API liest die
+Geometrie deshalb aus dem Seed (`readers.segments_from`); der Streaming-Job
+bleibt unangetastet.
+
 ---
 
 ## 2. Open-Meteo (Forecast + Archive)
@@ -236,7 +262,8 @@ keinen Mehrwert für den Join bringt. Wert geht als Vorgabe an SCRUM-81.
       Secret, Cache-Staleness-Verhalten berücksichtigen
 - [ ] An SCRUM-83: Baseline-Schlüssel und Broadcast-Ladevorgang
       umsetzen; Sonderbehandlung für Segmente ohne Baseline-Historie
-- [ ] An SCRUM-90: Open-Meteo-Attribution im Dashboard-Footer umsetzen
+- [x] An SCRUM-90: Open-Meteo-Attribution im Dashboard-Footer umsetzen
+      (erledigt 10.09.2026, Footer beider UI-Seiten)
 - [ ] Baseline-Parquet-Dateien nach MinIO verschieben, sobald SCRUM-78
       steht; Pfad hier nachtragen
 - [ ] Cache-Staleness über mehrere Abrufe hinweg beobachten, um reale

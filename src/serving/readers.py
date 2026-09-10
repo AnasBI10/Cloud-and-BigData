@@ -49,6 +49,8 @@ class GoldReader(Protocol):
 
     def reference_speed(self, link_id: str, ts: datetime) -> float | None: ...
 
+    def baseline_links(self) -> set[str]: ...
+
     def probe(self) -> tuple[bool, str]: ...
 
 
@@ -249,6 +251,9 @@ class FixtureReader:
             return None
         return self._baseline(link_id, ts)[0]
 
+    def baseline_links(self) -> set[str]:
+        return {s["link_id"] for s in self.seed} - self._no_baseline
+
     def probe(self) -> tuple[bool, str]:
         return True, f"Fixture-Modus, {len(self.seed)} Segmente aus dem Seed"
 
@@ -346,6 +351,16 @@ class BaselineIndex:
 
     def cells(self) -> int:
         return len(self._cache.get(self._load))
+
+    def links(self) -> set[str]:
+        """Alle Segmente, fuer die ueberhaupt eine Baseline-Zelle existiert.
+
+        Unabhaengig davon, ob gerade eine Messung vorliegt: ein Segment ohne
+        aktuelles Fenster ist nicht unbewertbar, es hat nur gerade nichts
+        gemeldet. Das sind zwei verschiedene Aussagen, und die Karte muss sie
+        auseinanderhalten koennen.
+        """
+        return {link_id for link_id, _, _ in self._cache.get(self._load)}
 
 
 def _as_utc(ts: datetime) -> datetime:
@@ -549,6 +564,9 @@ class DeltaReader:
         cell = self.baseline.lookup(link_id, ts)
         return cell[0] if cell else None
 
+    def baseline_links(self) -> set[str]:
+        return self.baseline.links()
+
     def probe(self) -> tuple[bool, str]:
         try:
             dt = self._table()
@@ -574,21 +592,39 @@ def build_reader(settings: Settings) -> GoldReader:
     return FixtureReader(settings)
 
 
-def segments_from(seed: list[dict], windows: list[SegmentWindow]) -> list[Segment]:
+def segments_from(
+    seed: list[dict],
+    windows: list[SegmentWindow],
+    baseline_links: set[str] | None = None,
+) -> list[Segment]:
     """Kartengrundlage: alle Seed-Segmente, angereichert um den letzten
     bekannten Zustand. Segmente ohne aktuelle Messung fallen nicht weg —
-    sie erscheinen als grau, nicht als nicht vorhanden."""
+    sie erscheinen als grau, nicht als nicht vorhanden.
+
+    ``baseline_links`` sind die Segmente, fuer die eine Baseline existiert.
+    Ohne diese Angabe liesse sich ``has_baseline`` nur aus dem letzten Fenster
+    ableiten, und ein Segment ohne aktuelle Messung waere nicht von einem ohne
+    Historie zu unterscheiden — die Karte wuerde "hat gerade nichts gemeldet"
+    als "koennen wir grundsaetzlich nicht bewerten" ausgeben.
+    """
     by_id = {w.link_id: w for w in windows}
     out = []
     for s in seed:
-        w = by_id.get(s["link_id"])
+        link_id = s["link_id"]
+        w = by_id.get(link_id)
+        if baseline_links is not None:
+            has_baseline = link_id in baseline_links
+        else:
+            has_baseline = bool(w.has_baseline) if w else False
         out.append(
             Segment(
-                link_id=s["link_id"],
+                link_id=link_id,
                 link_name=s.get("link_name"),
                 borough=s.get("borough"),
-                link_points=(w.link_points if w else s.get("link_points")),
-                has_baseline=bool(w.has_baseline) if w else False,
+                # Der Sink aggregiert link_points weg; die Geometrie kommt aus
+                # dem Seed (siehe src/ingestion/enrich_seed_geometry.py).
+                link_points=(w.link_points if w and w.link_points else s.get("link_points")),
+                has_baseline=has_baseline,
                 last_seen=w.window_start if w else None,
                 last_speed=w.speed_avg if w else None,
                 last_score=w.congestion_score if w else None,

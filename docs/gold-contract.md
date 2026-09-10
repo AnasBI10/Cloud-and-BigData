@@ -130,7 +130,7 @@ Lokal ohne Cluster geht dasselbe gegen ein Verzeichnis: `DELTA_URI` und
 
 ## Offene Punkte
 
-Alle fuenf betreffen das Processing, nicht die API.
+Vier der fuenf betreffen das Processing, nicht die API; Punkt 5 ist erledigt.
 
 1. **Baseline-Schluessel in UTC statt NYC-Ortszeit.** `compute_baseline.py`
    bildet `weekday`/`hour_of_day` direkt aus `event_time`, also aus UTC. Der
@@ -154,9 +154,9 @@ Alle fuenf betreffen das Processing, nicht die API.
    `weather_condition`, `temperature_c` und `precipitation_mm` sind in jeder
    API-Antwort `null`. Die Felder bleiben im Modell, damit der Vertrag steht,
    sobald der Join geliefert wird.
-5. **Keine Geometrie fuer die Karte (SCRUM-90).** `link_points` liefert nur
-   der Live-Poller in die Bronze-/Silver-Schicht; der Gold-Sink aggregiert es
-   weg und `data/dot_links_seed.json` enthaelt es nicht. Fuer die Karte muss
-   entweder der Seed einmalig um `link_points` aus dem DOT-Feed ergaenzt
-   werden (einmaliger Datenlauf, keine Pipeline-Aenderung) oder die Karte
-   kommt ohne Polylinien aus.
+5. ~~**Keine Geometrie fuer die Karte (SCRUM-90).**~~ **Erledigt am
+   10.09.2026.** Der Seed wurde einmalig um `link_points` aus dem DOT-Feed
+   ergaenzt (`src/ingestion/enrich_seed_geometry.py`, 125 von 125 Segmenten).
+   Der Sink blieb unangetastet: die API liest die Geometrie in
+   `segments_from` aus dem Seed. Details und Aenderungsnachweis in
+   DATA_SOURCES.md.
