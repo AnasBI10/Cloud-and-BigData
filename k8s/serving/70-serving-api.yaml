@@ -35,6 +35,10 @@ data:
   DEFAULT_LIMIT: "10"
   MAX_LIMIT: "200"
   LOG_LEVEL: "INFO"
+  # UI und API teilen sich den Ingress, der Browser braucht CORS also nicht.
+  # "*" bleibt, solange kein fester Host existiert — seit SCRUM-89 nimmt die
+  # API aber POST entgegen, deshalb hier eingrenzen, sobald moeglich.
+  CORS_ORIGINS: "*"
   # --- Einspeisung, Rolle Datenlieferant (SCRUM-89) ---
   # "kafka" ist der Abgabestand: Events aus der UI gehen denselben Weg wie
   # echte DOT-Messungen. "dryrun" protokolliert nur und ist Entwicklungsmodus.

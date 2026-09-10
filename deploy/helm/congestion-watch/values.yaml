@@ -67,11 +67,29 @@ socrata:
 
 serving:
   image: congestion-watch/serving:0.2.0
+  # Auf die tatsaechliche UI-Origin eingrenzen, sobald der Ingress-Host
+  # feststeht (z. B. "http://congestion-watch.example"). Siehe Kommentar in
+  # templates/serving.yaml.
+  corsOrigins: "*"
   replicas: 2
   port: 8000
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 500m, memory: 512Mi }
+  ingress:
+    enabled: true
+    host: ""
+
+ui:
+  image: congestion-watch/ui:0.1.0
+  replicas: 2
+  port: 8080
+  # Leer = gleiche Herkunft. Nur setzen, wenn die API unter einer anderen
+  # Adresse laeuft als die UI (etwa bei getrennten Hosts).
+  apiBaseUrl: ""
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits:   { cpu: 100m, memory: 96Mi }
   ingress:
     enabled: true
     host: ""

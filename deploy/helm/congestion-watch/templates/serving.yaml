@@ -19,6 +19,13 @@ data:
   DEFAULT_LIMIT: "10"
   MAX_LIMIT: "200"
   LOG_LEVEL: "INFO"
+  # UI und API liegen hinter demselben Ingress, der Browser stellt also
+  # gleiche-Herkunft-Anfragen und braucht CORS gar nicht. "*" ist trotzdem
+  # der Default, weil der Ingress-Host im Chart nicht feststeht. Sobald er es
+  # tut, gehoert hier die konkrete Origin hin: seit SCRUM-89 nimmt die API
+  # POST entgegen, und "*" heisst, dass jede beliebige Seite im Browser eines
+  # Nutzers Events einspeisen koennte.
+  CORS_ORIGINS: {{ .Values.serving.corsOrigins | quote }}
   # Einspeisung aus der UI (SCRUM-89): echter Producer gegen dieselbe
   # Schema-Registry wie die Ingestion-Pods.
   INGEST_MODE: "kafka"
@@ -102,11 +109,16 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: /
+          # Nur die API-Pfade. "/" gehoert seit SCRUM-91 der UI — stuende hier
+          # weiterhin "/", wuerden sich zwei Ingress-Regeln um dieselbe Wurzel
+          # streiten und je nach Auswertung die UI oder die API verschwinden.
+          {{- range $path := list "/api" "/docs" "/openapi.json" "/health" "/ready" }}
+          - path: {{ $path }}
             pathType: Prefix
             backend:
               service:
                 name: serving-api
                 port:
                   number: 80
+          {{- end }}
 {{- end }}

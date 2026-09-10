@@ -1,0 +1,118 @@
+# SCRUM-91 — Web-UI.
+#
+# Workload-Typ Deployment (SCRUM-92): die UI liefert statische Dateien aus,
+# haelt keinen Zustand, keine Identitaet und kein Volume. Jede Replik kann
+# jede Anfrage beantworten. Ein StatefulSet waere hier nicht nur unnoetig,
+# sondern falsch — es wuerde eine Ordnung erzwingen, die es nicht gibt.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ui-config
+  labels:
+    app.kubernetes.io/name: ui
+    app.kubernetes.io/part-of: nyc-congestion-watch
+data:
+  # Basis-URL der Serving-API. Leer heisst "gleiche Herkunft wie die UI" —
+  # im Cluster stimmt das, weil derselbe Ingress /api auf die Serving-API
+  # leitet. Damit steht die Adresse nirgends im Image und dasselbe Artefakt
+  # laeuft lokal (http://localhost:8000) wie hier.
+  API_BASE_URL: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  labels:
+    app.kubernetes.io/name: ui
+    app.kubernetes.io/part-of: nyc-congestion-watch
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ui
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ui
+          image: congestion-watch/ui:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ui-config
+          # Beide Probes zeigen auf /healthz und nicht auf /: eine Probe soll
+          # nicht bei jedem Durchlauf das komplette HTML ausliefern.
+          #
+          # Anders als bei der Serving-API sind Liveness und Readiness hier
+          # dieselbe Frage. Die UI haengt an keiner Datenquelle: sie kann
+          # ausliefern, sobald nginx laeuft. Ob die API antwortet, zeigt sie
+          # im Kopf an, statt sich selbst aus dem Service zu nehmen — ein
+          # Dashboard, das "API nicht erreichbar" sagt, ist brauchbarer als
+          # eines, das gar nicht laedt.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "96Mi"
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  labels:
+    app.kubernetes.io/name: ui
+spec:
+  selector:
+    app.kubernetes.io/name: ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Die UI liegt auf "/", die API auf "/api" — gleiche Herkunft, deshalb
+# braucht der Browser fuer die Aufrufe kein CORS. Die Pfadaufteilung ist
+# damit nicht Kosmetik, sondern der Grund, warum API_BASE_URL leer bleiben
+# kann. Der Ingress der Serving-API (70-serving-api.yaml) beansprucht
+# entsprechend nur /api, /docs und /openapi.json.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ui
+  labels:
+    app.kubernetes.io/name: ui
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  name: http

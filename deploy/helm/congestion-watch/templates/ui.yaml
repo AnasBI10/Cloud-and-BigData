@@ -1,0 +1,92 @@
+# SCRUM-91 — Web-UI. Workload-Typ Deployment (SCRUM-92): statische
+# Auslieferung, kein Zustand, keine Identitaet, kein Volume.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ui-config
+  namespace: {{ .Values.namespace }}
+data:
+  # Leer = gleiche Herkunft wie die UI. Der Ingress unten leitet /api auf die
+  # Serving-API, damit steht die API-Adresse nirgends im Image.
+  API_BASE_URL: {{ .Values.ui.apiBaseUrl | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: ui
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      app: ui
+  template:
+    metadata:
+      labels:
+        app: ui
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ui
+          image: {{ .Values.ui.image }}
+          ports:
+            - containerPort: {{ .Values.ui.port }}
+          envFrom:
+            - configMapRef:
+                name: ui-config
+          # Liveness und Readiness sind hier dieselbe Frage: die UI haengt an
+          # keiner Datenquelle. Ob die API antwortet, zeigt sie im Kopf an,
+          # statt sich selbst aus dem Service zu nehmen.
+          livenessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.ui.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /healthz, port: {{ .Values.ui.port }} }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: ui
+  ports:
+    - port: 80
+      targetPort: {{ .Values.ui.port }}
+{{- if .Values.ui.ingress.enabled }}
+---
+# UI auf "/", API auf "/api". Gleiche Herkunft, deshalb braucht der Browser
+# kein CORS — das ist der Grund, warum API_BASE_URL leer bleiben kann.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ui
+  namespace: {{ .Values.namespace }}
+spec:
+  rules:
+    - {{- if .Values.ui.ingress.host }}
+      host: {{ .Values.ui.ingress.host }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  number: 80
+{{- end }}
