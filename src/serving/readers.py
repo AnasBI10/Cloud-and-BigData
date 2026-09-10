@@ -5,7 +5,10 @@ Zwei Implementierungen hinter einer Schnittstelle:
 * ``FixtureReader``  — erzeugt den Vertrag aus docs/gold-contract.md aus den
   echten link_id-Werten des Seeds. Entwicklungsmodus, solange SCRUM-86 die
   Delta-Tabelle noch nicht schreibt. NICHT der Abgabestand.
-* ``DeltaReader``    — liest die echte Delta-Tabelle von MinIO.
+* ``DeltaReader``    — liest die echte Delta-Tabelle von MinIO und verbindet
+  sie ueber ``BaselineIndex`` mit der Baseline-Tabelle aus
+  compute_baseline.py. Der Sink schreibt andere Spaltennamen als der Vertrag;
+  die Abbildung steht in ``DeltaReader.SINK_COLUMNS``.
 
 Bewusst ohne Spark: die API braucht keine Session, keinen Executor und keine
 JVM, um eine Delta-Tabelle zu lesen. delta-rs liest das Transaktionslog nativ,
@@ -43,6 +46,8 @@ class GoldReader(Protocol):
     def latest_windows(self) -> list[SegmentWindow]: ...
 
     def timeseries(self, link_id: str, hours: int) -> list[SegmentWindow]: ...
+
+    def reference_speed(self, link_id: str, ts: datetime) -> float | None: ...
 
     def probe(self) -> tuple[bool, str]: ...
 
@@ -239,8 +244,116 @@ class FixtureReader:
                 out.append(w)
         return out
 
+    def reference_speed(self, link_id: str, ts: datetime) -> float | None:
+        if link_id in self._no_baseline:
+            return None
+        return self._baseline(link_id, ts)[0]
+
     def probe(self) -> tuple[bool, str]:
         return True, f"Fixture-Modus, {len(self.seed)} Segmente aus dem Seed"
+
+
+# ---------------------------------------------------------------------------
+# Baseline
+# ---------------------------------------------------------------------------
+
+
+class BaselineIndex:
+    """Erwartungswert und Streuung je ``link_id`` x Wochentag x Stunde.
+
+    Der Gold-Sink (SCRUM-86) schreibt keine Baseline mit — er kennt nur die
+    Absolutgeschwindigkeit des Fensters. Die Historie liegt in einer zweiten
+    Tabelle, die ``src/processing/compute_baseline.py`` als Batch aus der
+    Silver-Schicht berechnet. Die API verbindet beide.
+
+    Damit bleibt die Aussage erhalten, auf der das Dashboard steht: ein
+    Segment ist erst dann auffaellig, wenn es gemessen an SEINER eigenen
+    Historie langsam ist, nicht wenn es absolut langsam ist. Der Lincoln
+    Tunnel faehrt immer 20 mph — das ist kein Stau, das ist Dienstag.
+
+    Fehlt die Tabelle, ist der Index leer. Dann ist ``has_baseline`` ueberall
+    ``false``: unbewertbar, nicht unauffaellig. Kein Grund fuer einen 503.
+    """
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self._cache = TTLCache(settings.baseline_ttl_s)
+
+    @staticmethod
+    def spark_weekday(ts: datetime) -> int:
+        """Wochentag in der Zaehlung von Sparks ``dayofweek``: 1 = Sonntag.
+
+        Python zaehlt ab Montag. Die Schluessel muessen exakt so gebildet
+        werden wie in compute_baseline.py, sonst trifft der Join die falsche
+        Zelle und der Score ist um Tage verschoben.
+        """
+        return (ts.isoweekday() % 7) + 1
+
+    def _load(self) -> dict[tuple[str, int, int], tuple[float, float]]:
+        try:
+            from deltalake import DeltaTable
+        except ImportError as exc:  # pragma: no cover
+            raise ReaderError("deltalake nicht installiert") from exc
+
+        try:
+            dt = DeltaTable(
+                self.settings.baseline_uri,
+                storage_options=self.settings.storage_options(),
+            )
+            rows = dt.to_pyarrow_table(
+                columns=[
+                    "link_id",
+                    "weekday",
+                    "hour_of_day",
+                    "baseline_speed",
+                    "baseline_stddev",
+                ]
+            ).to_pylist()
+        except Exception as exc:
+            # Haeufigster Fall: compute_baseline.py ist noch nicht gelaufen.
+            log.warning(
+                "Baseline-Tabelle %s nicht lesbar (%s) — alle Segmente gelten "
+                "als unbewertbar, has_baseline=false",
+                self.settings.baseline_uri,
+                exc,
+            )
+            return {}
+
+        index: dict[tuple[str, int, int], tuple[float, float]] = {}
+        for r in rows:
+            stddev = r.get("baseline_stddev")
+            speed = r.get("baseline_speed")
+            # stddev ist null bei Zellen mit genau einer Messung und 0.0 bei
+            # konstanter Geschwindigkeit. In beiden Faellen ist der z-Score
+            # nicht definiert — die Zelle zaehlt nicht als Baseline.
+            if speed is None or stddev is None or stddev <= 0:
+                continue
+            index[(r["link_id"], int(r["weekday"]), int(r["hour_of_day"]))] = (
+                float(speed),
+                float(stddev),
+            )
+        log.info(
+            "Baseline geladen: %d Zellen ueber %d Segmente",
+            len(index),
+            len({k[0] for k in index}),
+        )
+        return index
+
+    def lookup(self, link_id: str, window_start: datetime) -> tuple[float, float] | None:
+        index = self._cache.get(self._load)
+        ts = _as_utc(window_start)
+        return index.get((link_id, self.spark_weekday(ts), ts.hour))
+
+    def cells(self) -> int:
+        return len(self._cache.get(self._load))
+
+
+def _as_utc(ts: datetime) -> datetime:
+    """Delta liefert je nach Schreiber tz-behaftete oder naive Zeitstempel.
+    Der Vertrag sagt UTC — naive Werte werden entsprechend gelesen."""
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -249,37 +362,41 @@ class FixtureReader:
 
 
 class DeltaReader:
-    """Liest die Gold-Tabelle von MinIO (SCRUM-86).
+    """Liest die Gold-Tabelle von MinIO (SCRUM-86) und verbindet sie mit der
+    Baseline (compute_baseline.py).
 
-    Partitionspruning ueber ``window_date`` — ohne das liest jede Abfrage
-    saemtliche Parquet-Dateien der Tabelle. Die Partitionierung ist deshalb
-    Teil des Vertrags und nicht dem Sink ueberlassen (SCRUM-87).
+    Bewusst ohne Spark: delta-rs liest das Transaktionslog nativ, der Pod
+    bleibt bei ~200 MB statt ~1,5 GB. Das ist auch der Grund, warum die
+    Serving-Schicht unabhaengig vom Spark-Job skaliert (SCRUM-93).
+
+    Die Spaltennamen des Sinks sind NICHT die des Vertrags. Die Abbildung
+    steht in ``SINK_COLUMNS`` und ist die einzige Stelle, die beides kennt —
+    Abweichungen und ihr Stand sind in docs/gold-contract.md protokolliert.
     """
 
     name = "delta"
 
-    COLUMNS = [
-        "link_id",
-        "window_start",
-        "window_end",
-        "speed_avg",
-        "sample_count",
-        "baseline_speed",
-        "baseline_stddev",
-        "congestion_score",
-        "has_baseline",
-        "borough",
-        "link_name",
-        "link_points",
-        "weather_condition",
-        "temperature_c",
-        "precipitation_mm",
-        "is_late_arrival",
-    ]
+    # Vertragsname (models.SegmentWindow) -> Spalte, wie der Sink sie schreibt
+    # (src/processing/streaming_job_bsg.py, Funktion process_batch).
+    SINK_COLUMNS = {
+        "link_id": "link_id",
+        "window_start": "window_start",
+        "window_end": "window_end",
+        "speed_avg": "avg_speed_mph",
+        "sample_count": "sample_count",
+        "speed_index": "congestion_score",
+        "borough": "borough",
+        "is_late_arrival": "late_event_detected",
+    }
+
+    # Pflichtspalten. Fehlt eine davon, passt die Tabelle nicht zum Vertrag
+    # und ein stiller Teil-Erfolg waere schlimmer als ein klarer Fehler.
+    REQUIRED = ("link_id", "window_start", "window_end", "avg_speed_mph")
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._storage = settings.storage_options()
+        self.baseline = BaselineIndex(settings)
 
     def _table(self):
         try:
@@ -299,22 +416,44 @@ class DeltaReader:
 
         dt = self._table()
         dataset = dt.to_pyarrow_dataset()
+        available = set(dataset.schema.names)
 
-        # Partitionsspalte zuerst: schneidet ganze Verzeichnisse weg, bevor
-        # ueberhaupt eine Datei geoeffnet wird.
-        expr = pads.field("window_date") >= since.strftime("%Y-%m-%d")
-        expr = expr & (pads.field("window_start") >= since)
+        missing = [c for c in self.REQUIRED if c not in available]
+        if missing:
+            raise ReaderError(
+                f"Gold-Tabelle ohne Pflichtspalten {missing} — "
+                "Vertrag und Sink laufen auseinander, siehe docs/gold-contract.md"
+            )
+
+        # Zeitstempel muessen zur Spalte passen: vergleicht man einen
+        # tz-behafteten Wert mit einer naiven Spalte, wirft pyarrow.
+        field = dataset.schema.field("window_start")
+        since = since if getattr(field.type, "tz", None) else since.replace(tzinfo=None)
+
+        expr = pads.field("window_start") >= since
+        if "window_date" in available:
+            # Partitionspruning, sobald SCRUM-87 die Spalte schreibt: schneidet
+            # ganze Verzeichnisse weg, bevor eine Datei geoeffnet wird. Der
+            # aktuelle Sink partitioniert noch nicht, deshalb optional.
+            expr = (pads.field("window_date") >= since.strftime("%Y-%m-%d")) & expr
         if link_id is not None:
             expr = expr & (pads.field("link_id") == link_id)
 
-        available = set(dataset.schema.names)
-        columns = [c for c in self.COLUMNS if c in available]
-        missing = [c for c in self.COLUMNS if c not in available]
-        if missing:
-            # Nicht abbrechen: fehlende optionale Spalten sind waehrend der
-            # Schema-Evolution (SCRUM-88) ein Uebergangszustand. Aber laut
-            # genug loggen, dass es auffaellt.
-            log.warning("Gold-Tabelle ohne Spalten %s — Vertrag pruefen", missing)
+        # pyarrow erwartet Ausdruecke, keine Spaltennamen — so wird die
+        # Umbenennung schon beim Lesen erledigt und nicht zeilenweise danach.
+        columns = {
+            alias: pads.field(source)
+            for alias, source in self.SINK_COLUMNS.items()
+            if source in available
+        }
+        absent = [a for a in self.SINK_COLUMNS if a not in columns]
+        if absent:
+            # Optionale Spalten (Wetter-Enrichment SCRUM-84, Late-Marker) sind
+            # ein Uebergangszustand. Nicht abbrechen, aber laut genug loggen.
+            log.warning(
+                "Gold-Tabelle ohne Spalten %s — Vertrag pruefen (gold-contract.md)",
+                absent,
+            )
 
         try:
             table = dataset.to_table(filter=expr, columns=columns)
@@ -322,9 +461,64 @@ class DeltaReader:
             raise ReaderError(f"Abfrage fehlgeschlagen: {exc}") from exc
         return table.to_pylist()
 
-    @staticmethod
-    def _to_model(row: dict) -> SegmentWindow:
-        return SegmentWindow(**row)
+    def _to_model(self, row: dict) -> SegmentWindow:
+        """Sink-Zeile plus Baseline-Zelle -> Vertragsobjekt.
+
+        Der Score des Sinks (0-100 aus der Absolutgeschwindigkeit) wandert
+        unveraendert nach ``speed_index``. ``congestion_score`` ist die
+        standardisierte Abweichung des Vertrags und bleibt ``null``, wenn es
+        fuer diese Zelle keine Historie gibt.
+        """
+        link_id = row["link_id"]
+        window_start = _as_utc(row["window_start"])
+        speed = row.get("speed_avg")
+        speed = float(speed) if speed is not None else None
+
+        baseline = self.baseline.lookup(link_id, window_start)
+        score = None
+        expected = stddev = None
+        if baseline is not None:
+            expected, stddev = baseline
+            if speed is not None:
+                score = round((expected - speed) / stddev, 2)
+
+        return SegmentWindow(
+            link_id=link_id,
+            window_start=window_start,
+            window_end=_as_utc(row["window_end"]),
+            speed_avg=round(speed, 2) if speed is not None else None,
+            sample_count=int(row.get("sample_count") or 0),
+            baseline_speed=round(expected, 2) if expected is not None else None,
+            baseline_stddev=round(stddev, 2) if stddev is not None else None,
+            congestion_score=score,
+            has_baseline=baseline is not None,
+            speed_index=(
+                float(row["speed_index"]) if row.get("speed_index") is not None else None
+            ),
+            borough=row.get("borough"),
+            # link_name und link_points aggregiert der Sink nicht mit. Beide
+            # kommen fuer die Anzeige aus dem Seed (readers.segments_from,
+            # main.timeseries), deshalb hier bewusst leer statt geraten.
+            link_name=None,
+            link_points=None,
+            is_late_arrival=bool(row.get("is_late_arrival") or False),
+        )
+
+    def _tumbling(self, rows: list[dict]) -> list[dict]:
+        """Aus den gleitenden Fenstern des Sinks die nicht ueberlappenden
+        herausgreifen.
+
+        Der Job schreibt 5-Minuten-Fenster mit 1 Minute Versatz, also fuenf
+        Zeilen je Segment und Fuenfminutenblock, die einander zu 80 Prozent
+        enthalten. Fuer eine Zeitreihe ist nur jede fuenfte davon eine neue
+        Information.
+        """
+        if not self.settings.tumbling_only:
+            return rows
+        aligned = [r for r in rows if _as_utc(r["window_start"]).minute % WINDOW_MINUTES == 0]
+        # Nie alles wegfiltern: haette der Job eine andere Fenstergroesse,
+        # bliebe sonst eine leere Zeitreihe statt einer dichten.
+        return aligned or rows
 
     def latest_windows(self) -> list[SegmentWindow]:
         # Drei Fenster zurueck, dann je Segment das juengste behalten: bei einer
@@ -334,20 +528,37 @@ class DeltaReader:
         newest: dict[str, dict] = {}
         for row in self._query(since):
             prev = newest.get(row["link_id"])
-            if prev is None or row["window_start"] > prev["window_start"]:
+            if prev is None or _as_utc(row["window_start"]) > _as_utc(prev["window_start"]):
                 newest[row["link_id"]] = row
         return [self._to_model(r) for r in newest.values()]
 
     def timeseries(self, link_id: str, hours: int) -> list[SegmentWindow]:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        rows = self._query(since, link_id=link_id)
-        rows.sort(key=lambda r: r["window_start"])
+        rows = self._tumbling(self._query(since, link_id=link_id))
+        rows.sort(key=lambda r: _as_utc(r["window_start"]))
         return [self._to_model(r) for r in rows]
+
+    def reference_speed(self, link_id: str, ts: datetime) -> float | None:
+        """Erwartungswert des Segments fuer diese Stunde.
+
+        Grundlage fuer den Szenario-Generator (SCRUM-89): ein Stau-Szenario
+        soll von der ueblichen Geschwindigkeit DIESES Segments ausgehen, nicht
+        von einem pauschalen Wert — sonst erzeugt es auf einem langsamen
+        Segment eine Beschleunigung.
+        """
+        cell = self.baseline.lookup(link_id, ts)
+        return cell[0] if cell else None
 
     def probe(self) -> tuple[bool, str]:
         try:
             dt = self._table()
-            return True, f"Delta-Version {dt.version()} unter {self.settings.delta_uri}"
+            cells = self.baseline.cells()
+            detail = f"Delta-Version {dt.version()} unter {self.settings.delta_uri}"
+            if cells:
+                detail += f", Baseline mit {cells} Zellen"
+            else:
+                detail += ", OHNE Baseline (alle Segmente unbewertbar)"
+            return True, detail
         except ReaderError as exc:
             return False, str(exc)
 

@@ -23,7 +23,10 @@ class Settings:
     # am Vertrag aus docs/gold-contract.md, nicht an seiner Herkunft.
     gold_reader: str
     delta_uri: str
+    baseline_uri: str
     cache_ttl_s: int
+    baseline_ttl_s: int
+    tumbling_only: bool
 
     # --- MinIO / S3 -------------------------------------------------------
     s3_endpoint: str
@@ -44,17 +47,38 @@ class Settings:
     def from_env() -> "Settings":
         return Settings(
             gold_reader=os.getenv("GOLD_READER", "fixture").lower(),
-            delta_uri=os.getenv(
-                "DELTA_URI", "s3://congestion-watch/gold/segment_windows"
-            ),
+            # Pfad wie ihn der Sink aus SCRUM-86 tatsaechlich schreibt
+            # (streaming_job_bsg.py, GOLD_TABLE_PATH). Der frueher hier
+            # eingetragene Bucket "congestion-watch" existiert nicht — Helm
+            # legt nur "bronze" und "gold" an (values.yaml, minio.buckets).
+            delta_uri=os.getenv("DELTA_URI", "s3://gold/congestion_scores"),
+            # Zweite Tabelle, geschrieben von src/processing/compute_baseline.py.
+            # Der Sink schreibt keine Baseline in die Gold-Tabelle, die API
+            # verbindet beide (siehe readers.BaselineIndex).
+            baseline_uri=os.getenv("BASELINE_URI", "s3://gold/baseline_profile"),
             # Das Dashboard pollt im Sekundentakt, die Gold-Tabelle bekommt
             # aber nur alle 5 Minuten ein neues Fenster. Ohne Cache liest jede
             # Anfrage das Delta-Log neu — das kostet nur Zeit und liefert
             # dasselbe Ergebnis.
             cache_ttl_s=int(os.getenv("CACHE_TTL_S", "20")),
+            # Die Baseline ist ein Batch-Ergebnis ueber Wochen von Historie und
+            # aendert sich nur, wenn compute_baseline.py neu laeuft. Sie
+            # haeufiger zu lesen als der CronJob sie schreibt, bringt nichts.
+            baseline_ttl_s=int(os.getenv("BASELINE_TTL_S", "900")),
+            # Der Sink schreibt gleitende Fenster (5 Minuten, 1 Minute Slide),
+            # also fuenf einander ueberlappende Zeilen je Segment und
+            # Fuenfminutenblock. Fuer den Chart in SCRUM-90 ist das kein
+            # Mehrwert, sondern vierfach dieselbe Messung. Auf "false"
+            # stellen, wer die gleitende Sicht wirklich sehen will.
+            tumbling_only=os.getenv("TUMBLING_ONLY", "true").lower() == "true",
             s3_endpoint=os.getenv("S3_ENDPOINT", "http://minio:9000"),
-            s3_access_key=os.getenv("S3_ACCESS_KEY") or None,
-            s3_secret_key=os.getenv("S3_SECRET_KEY") or None,
+            # Fallback auf die MinIO-Variablen: das Secret "minio-credentials"
+            # heisst im Cluster MINIO_ROOT_USER/MINIO_ROOT_PASSWORD und wird
+            # per envFrom in mehrere Pods gereicht. Ohne diesen Fallback
+            # startet die API dort ohne Zugangsdaten und laeuft im
+            # Delta-Modus in ein 403.
+            s3_access_key=os.getenv("S3_ACCESS_KEY") or os.getenv("MINIO_ROOT_USER") or None,
+            s3_secret_key=os.getenv("S3_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD") or None,
             s3_region=os.getenv("S3_REGION", "us-east-1"),
             # MinIO laeuft im Cluster ohne TLS. delta-rs verweigert HTTP sonst.
             s3_allow_http=os.getenv("S3_ALLOW_HTTP", "true").lower() == "true",

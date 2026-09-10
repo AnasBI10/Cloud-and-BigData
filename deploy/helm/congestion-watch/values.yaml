@@ -82,3 +82,11 @@ processing:
   resources:
     requests: { cpu: 500m, memory: 1Gi }
     limits:   { cpu: 1, memory: 2Gi }
+  # Batch-Lauf fuer das Baseline-Profil, das die Serving-API zum Score braucht.
+  # Alle sechs Stunden: die Historie waechst langsam, oefter zu rechnen aendert
+  # die Zellen kaum, kostet aber eine CPU aus dem ResourceQuota.
+  baseline:
+    schedule: "0 */6 * * *"
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits:   { cpu: 1, memory: 2Gi }

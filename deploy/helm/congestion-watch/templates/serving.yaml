@@ -4,9 +4,21 @@ metadata:
   name: serving-config
   namespace: {{ .Values.namespace }}
 data:
-  MINIO_ENDPOINT: "http://minio:9000"
-  BUCKET_GOLD: "gold"
-  KAFKA_BOOTSTRAP: "kafka:9092"
+  # Konfiguration der Serving-API (src/serving/config.py). Die frueheren
+  # Schluessel BUCKET_GOLD/MINIO_ENDPOINT liest die API nicht — ohne
+  # GOLD_READER blieb sie im Fixture-Modus, also auf erfundenen Zahlen.
+  GOLD_READER: "delta"
+  DELTA_URI: "s3://gold/congestion_scores"
+  BASELINE_URI: "s3://gold/baseline_profile"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_ALLOW_HTTP: "true"
+  S3_REGION: "us-east-1"
+  CACHE_TTL_S: "20"
+  BASELINE_TTL_S: "900"
+  TUMBLING_ONLY: "true"
+  DEFAULT_LIMIT: "10"
+  MAX_LIMIT: "200"
+  LOG_LEVEL: "INFO"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -33,6 +45,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: serving-config
+            # Liefert MINIO_ROOT_USER/MINIO_ROOT_PASSWORD; config.py nimmt sie
+            # als Fallback fuer S3_ACCESS_KEY/S3_SECRET_KEY entgegen.
             - secretRef:
                 name: minio-credentials
           readinessProbe:

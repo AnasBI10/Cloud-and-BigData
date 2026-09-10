@@ -13,12 +13,21 @@ metadata:
     app.kubernetes.io/name: serving-api
     app.kubernetes.io/part-of: nyc-congestion-watch
 data:
-  # ACHTUNG, vor der Abgabe umstellen: "fixture" ist der Entwicklungsmodus,
-  # solange MinIO (SCRUM-78) und der Delta-Sink (SCRUM-86) nicht stehen.
-  # Der Zielzustand ist "delta" — die Aufgabenstellung verlangt eine real an
-  # die Pipeline angebundene UI, kein Mockup.
-  GOLD_READER: "fixture"
-  DELTA_URI: "s3://congestion-watch/gold/segment_windows"
+  # Abgabestand: "delta" liest die echte Gold-Tabelle aus MinIO. "fixture"
+  # bleibt als Entwicklungsmodus erhalten, ist aber NICHT der Abgabestand —
+  # die Aufgabenstellung verlangt eine real an die Pipeline angebundene UI.
+  GOLD_READER: "delta"
+  # Pfade wie der Spark-Job sie schreibt (deploy/helm/.../processing.yaml:
+  # GOLD_TABLE_PATH). Der Bucket heisst "gold", nicht "congestion-watch".
+  DELTA_URI: "s3://gold/congestion_scores"
+  # Zweite Tabelle: Erwartungswert und Streuung je Segment x Wochentag x
+  # Stunde, geschrieben vom CronJob baseline-profile. Ohne sie laeuft die API
+  # weiter, meldet aber jedes Segment als unbewertbar.
+  BASELINE_URI: "s3://gold/baseline_profile"
+  BASELINE_TTL_S: "900"
+  # Der Sink schreibt gleitende Fenster (5 Min Laenge, 1 Min Versatz). Fuer
+  # die Zeitreihe im Dashboard nur die nicht ueberlappenden verwenden.
+  TUMBLING_ONLY: "true"
   S3_ENDPOINT: "http://minio:9000"
   S3_ALLOW_HTTP: "true"
   S3_REGION: "us-east-1"
@@ -59,20 +68,23 @@ spec:
             - configMapRef:
                 name: serving-config
           env:
-            # Das Secret legt SCRUM-78 an. Solange es fehlt, startet der Pod
-            # nicht — deshalb optional markiert: im Fixture-Modus braucht die
-            # API keine MinIO-Zugangsdaten.
+            # Das Secret legt SCRUM-78 an. Die Schluessel heissen dort
+            # MINIO_ROOT_USER/MINIO_ROOT_PASSWORD (siehe
+            # deploy/helm/congestion-watch/templates/minio.yaml) — frueher
+            # standen hier access-key/secret-key, die es nie gab: die API
+            # bekam keine Zugangsdaten und lief im Delta-Modus in ein 403.
+            # optional: true, damit der Fixture-Modus ohne MinIO startet.
             - name: S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-credentials
-                  key: access-key
+                  key: MINIO_ROOT_USER
                   optional: true
             - name: S3_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: minio-credentials
-                  key: secret-key
+                  key: MINIO_ROOT_PASSWORD
                   optional: true
           # Liveness prueft nur den Prozess. Waere hier /ready eingetragen,
           # wuerde Kubernetes die Pods dauerhaft neu starten, solange der
