@@ -318,6 +318,170 @@ für alle Rohwerte und Herleitungen.
 
 ## 7. User-facing UI
 
+Die Aufgabenstellung verlangt eine Oberfläche **mindestens in der Rolle des
+Datenlieferanten**, real an die Pipeline angebunden. Umgesetzt sind beide
+Rollen: Einspeisung (SCRUM-89) und Anzeige (SCRUM-90), als ein Bundle unter
+`src/ui/`, containerisiert und über Traefik exponiert (SCRUM-91).
+
+### 7.1 Rolle Datenlieferant: der Weg ist der Punkt
+
+Entscheidend ist nicht, dass die UI Events erzeugt, sondern **welchen Weg sie
+nehmen**. Ein hier erzeugtes Event ist von einer echten DOT-Messung im Topic
+nicht zu unterscheiden — nur der Zeitstempel verrät es:
+
+```
+Formular / Szenario  (Browser)
+        │  POST /api/events
+        ▼
+Serving-API  ──►  EventPublisher aus src/ingestion/common.py
+        │              │ Avro-Serialisierung gegen die Schema-Registry
+        │              ▼
+        │         Kafka: traffic.speeds.raw
+        │              ▼
+        │         Spark Structured Streaming (Bronze → Silver → Gold)
+        │              ▼
+        │         Delta Lake auf MinIO
+        │              ▼
+        └──────►  Serving-API  ──►  Dashboard
+                  GET /api/anomalies, /api/segments, .../timeseries
+```
+
+Zwei Festlegungen dahinter:
+
+- **Kein Seiteneingang.** Die UI schreibt nichts direkt in die Gold-Schicht.
+  Täte sie es, wäre die Änderung sofort im Dashboard sichtbar — und der
+  vorgeführte Datenfluss wäre eine Behauptung statt eines Nachweises.
+- **Keine zweite Serialisierung.** `POST /api/events` benutzt denselben
+  `EventPublisher` und dieselbe `build_event()` wie die beiden Producer
+  (`src/ingestion/common.py`). Eine eigene Avro-Logik in der API hätte
+  bedeutet, dieselbe Definition eines Events an zwei Stellen zu pflegen; die
+  erste Abweichung hätte niemand bemerkt.
+
+Die API bleibt damit *lesend plus einspeisend*, aber sie kennt die Gold-Schicht
+weiterhin nur lesend.
+
+### 7.2 Bedienablauf Einspeisung
+
+**Einzelnes Event.** Segment aus den 125 bekannten `link_id` wählen,
+Geschwindigkeit setzen, Status wählen. Der Status ist bewusst bedienbar: `0`
+ist eine gültige Messung, `-101` der Sentinel des echten Feeds. Wer `-101`
+sendet, sieht im Dashboard, dass für dieses Segment **kein** neues Fenster
+entsteht — der Statusfilter des Spark-Jobs (Abschnitt 2, Veracity) wird damit
+vorführbar, statt nur behauptet zu sein.
+
+**Szenario-Generator.** Ein einzelnes Event verschiebt einen Mittelwert über
+ein 5-Minuten-Fenster kaum sichtbar; im Dashboard passiert dann scheinbar
+nichts, obwohl die Kette funktioniert. Deshalb erzeugt der Generator eine Folge
+von Events über X Minuten, in drei Verläufen:
+
+| Verlauf | Was passiert | Was es zeigt |
+|---|---|---|
+| `congestion` | Geschwindigkeit fällt auf 30 % des Ausgangswerts | Segment wandert in die Anomalie-Rangliste, Karte färbt um |
+| `recovery` | Gegenstück, zurück auf den Ausgangswert | Score fällt, Segment verlässt die Rangliste |
+| `sensor_outage` | Serie mit `status=-101` | Statusfilter greift, Segment bekommt keine neuen Fenster |
+
+Zwei Eigenschaften der Pipeline bestimmen dabei das Verhalten der UI:
+
+- **Der Lauf ist echtzeitgebunden, nicht rückdatiert.** Der Streaming-Job
+  markiert jedes Event, dessen `data_as_of` älter ist als die Watermark
+  (2 Minuten), als verspätet, schließt es aus der Aggregation aus und schickt
+  es in die DLQ. Ein Szenario, das seine Zeitstempel über die letzte
+  Viertelstunde verteilt auf einen Schlag sendet, käme im Dashboard nie an.
+- **Verspätung ist trotzdem vorführbar.** Wer beim Einzelevent bewusst
+  zurückdatiert, bekommt eine Ablehnung mit Begründung — oder setzt
+  `allow_late`, dann geht das Event absichtlich den DLQ-Weg aus SCRUM-85 und
+  die Quittung sagt das auch.
+
+Als Ausgangsgeschwindigkeit nimmt der Generator die **Baseline des gewählten
+Segments** für die aktuelle Stunde, nicht einen Pauschalwert. Ein fester
+Startwert hätte auf einem ohnehin langsamen Segment eine Beschleunigung
+erzeugt statt eines Staus.
+
+### 7.3 Bedienablauf Anzeige
+
+Das Dashboard konsumiert **ausschließlich** die Serving-API — kein direkter
+Zugriff auf Kafka, Delta oder MinIO aus dem Browser. Was dort steht, hat die
+Pipeline durchlaufen.
+
+- **Karte** aller 125 Segmente, gezeichnet aus `link_points` des DOT-Feeds,
+  eingefärbt nach `congestion_score`.
+- **Top-Anomalien** aus `/api/anomalies` ab 2 σ, mit Borough-Filter.
+- **Zeitreihe** je Segment: gemessene gegen erwartete Geschwindigkeit mit
+  1-σ-Band, umschaltbar auf 6/24/72 Stunden.
+
+Zwei Entscheidungen sind inhaltlich, nicht gestalterisch:
+
+**„Unbewertbar" ist kein Wert auf der Skala.** Die Karte trennt drei Zustände,
+die sonst in eins fallen: bewertete Segmente (sequenzielle Farbskala), Segmente
+ohne aktuelle Messung (grau, dünn) und Segmente ohne Baseline (violett,
+gestrichelt). Andere Farbfamilie **und** andere Strichart, damit „wissen wir
+nicht" nicht wie „unauffällig" aussieht. Das ist das Veracity-Argument aus
+Abschnitt 2 — 31 von 125 Segmenten ohne ausreichende Historie — als
+Darstellungsregel. Sie grün zu färben würde eine Aussage behaupten, die die
+Daten nicht hergeben. Aus demselben Grund zeigt die Rangliste immer mit an, wie
+viele Segmente gemessen, davon bewertbar und davon ohne Baseline sind: eine
+Liste, die nur Treffer zeigt, verschweigt die Lücke.
+
+**Lücken bleiben Lücken.** Bei einer Meldefrequenz von ~7,7 Minuten je Sensor
+(Abschnitt 2, Velocity) enthält nicht jedes 5-Minuten-Fenster für jedes Segment
+einen Wert. Die Zeitreihe bricht die Linie an solchen Stellen ab, statt
+durchzuziehen. Eine durchgezogene Linie über eine Stunde ohne Messung wäre eine
+Behauptung, die die Daten nicht decken; der Gold-Vertrag hält entsprechend
+fest, dass die API nicht interpoliert.
+
+Das Polling-Intervall liegt bei 20 Sekunden und entspricht damit dem
+Server-Cache der API (`CACHE_TTL_S`). Häufiger zu fragen liefert dieselbe
+Antwort und erzeugt nur Last.
+
+### 7.4 Technische Umsetzung
+
+Reines HTML/CSS/ES-Modules **ohne Build-Schritt**. Das Bundle wird ausgeliefert,
+wie es im Repo liegt; das Image besteht aus nginx plus rund 70 kB Dateien und
+braucht keine Node-Toolchain im Build.
+
+Auch die Karte ist eigener Code statt einer Kartenbibliothek: 125 Polylinien
+mit rund 1.300 Punkten, projiziert per Web-Mercator in ein SVG. Eine Bibliothek
+vom CDN wäre eine Fremdabhängigkeit zur Laufzeit, dazu käme die
+Kachel-Lizenzierung. So bleibt das Bundle self-contained und funktioniert auch
+ohne Internetzugang bei der Vorführung.
+
+Die Segmentgeometrie liegt im Seed (`data/dot_links_seed.json`), einmalig aus
+dem DOT-Feed ergänzt über `src/ingestion/enrich_seed_geometry.py`. Der
+Gold-Sink aggregiert `link_points` je Fenster zwar mit, liefert es aber nur für
+Segmente, die der Live-Poller speist — für die übrigen greift der Seed als
+Rückfall. Die vorgenommenen Änderungen an den Rohdaten sind in
+`DATA_SOURCES.md` dokumentiert, wie es Local Law 11 für die
+Weiterveröffentlichung verlangt (Abschnitt 1.3).
+
+**Konfiguration statt fester Adressen:** Die API-Basis-URL steht nicht im
+Bundle. Ein Skript unter `/docker-entrypoint.d/` schreibt `config.js` beim
+Containerstart aus `API_BASE_URL`, sodass dasselbe Image lokal gegen
+`localhost:8000` und im Cluster gegen den Ingress läuft. Im Cluster bleibt der
+Wert leer: UI und API liegen hinter demselben Ingress (`/` bzw. `/api`), also
+gleiche Herkunft — der Browser braucht dafür kein CORS.
+
+### 7.5 Grenzen
+
+- **`source` bleibt `SYNTHETIC`.** Das Avro-Enum kennt `DOT_LIVE`, `SYNTHETIC`
+  und `REPLAY`. Ein eigenes Symbol `UI` wäre eine nicht abwärtskompatible
+  Schemaänderung gewesen; der Nutzen rechtfertigt das Risiko am Vertrag nicht.
+  Von Hand erzeugte Events sind damit im Lake nicht von denen des
+  Lastgenerators zu unterscheiden.
+- **Der Fortschritt eines Szenarios ist pod-lokal.** Er lebt im Prozess, der
+  den Lauf fährt. Bei mehreren Repliken kann die Statusabfrage bei einem
+  anderen Pod landen; die UI sagt dann, dass der Fortschritt nicht abfragbar
+  ist, statt zu raten. Der Lauf selbst läuft weiter. Geteilter Zustand hätte
+  einen weiteren zustandsbehafteten Dienst bedeutet — für die Quittung eines
+  Knopfdrucks zu teuer.
+- **`CORS_ORIGINS` steht auf `*`,** weil der Ingress-Host im Chart nicht
+  feststeht. Seit die API POST entgegennimmt, heißt das, dass eine beliebige
+  Seite im Browser eines Nutzers Events einspeisen könnte. Für den internen
+  Prototyp vertretbar, vor einem echten Betrieb einzugrenzen.
+- **Die Wetterfelder sind durchgehend `null`,** solange der Enrichment-Join
+  (SCRUM-84b) fehlt. Die Felder bleiben im Modell, damit der Vertrag steht,
+  sobald der Join geliefert wird.
+
+
 ## 8. Kubernetes-Deployment
 
 ## 9. Deployment-Anleitung
