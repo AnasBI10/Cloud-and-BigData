@@ -54,6 +54,9 @@ def main() -> None:
         .where(f"sample_count >= {MIN_SAMPLES_PER_CELL}")
     )
 
+    # persist(): baseline wird gleich dreimal angefasst (write, count, distinct().count())
+    baseline.persist()
+
     (
         baseline.write
         .format("delta")
@@ -65,6 +68,8 @@ def main() -> None:
     total_cells = baseline.count()
     distinct_links = baseline.select("link_id").distinct().count()
     print(f"Baseline geschrieben: {total_cells} Zellen ueber {distinct_links} Segmente nach {BASELINE_TABLE_PATH}")
+
+    baseline.unpersist()
 
 
 if __name__ == "__main__":
