@@ -265,25 +265,41 @@ spec:
             - |
               set -eu
               SR="http://schema-registry:8081"
-              SUBJECT="traffic.speeds.raw-value"
               echo "warte auf Schema-Registry..."
               until curl -sf "$SR/subjects" >/dev/null; do sleep 5; done
-              PAYLOAD=$(awk '{printf "%s", $0}' /schemas/traffic_speed_event.avsc | sed 's/"/\\"/g')
-              CHECK=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
-                --data "{\"schema\": \"$PAYLOAD\"}" \
-                "$SR/compatibility/subjects/$SUBJECT/versions/latest?verbose=true")
-              if [ "$CHECK" != "404" ] && [ "$CHECK" != "200" ]; then
-                echo "Kompatibilitaetspruefung fehlgeschlagen (HTTP $CHECK)"
-                exit 1
-              fi
-              curl -sf -X POST \
-                -H "Content-Type: application/vnd.schemaregistry.v1+json" \
-                --data "{\"schema\": \"$PAYLOAD\"}" \
-                "$SR/subjects/$SUBJECT/versions"
-              echo ""
-              echo "--- registrierte Versionen fuer $SUBJECT ---"
-              curl -sf "$SR/subjects/$SUBJECT/versions"
+
+              for PAIR in \
+                "traffic.speeds.raw-value:/schemas/traffic_speed_event.avsc" \
+                "weather.observations.raw-value:/schemas/weather_observation_event.avsc"; do
+                SUBJECT="${PAIR%%:*}"
+                SCHEMA_FILE="${PAIR#*:}"
+
+                if [ ! -f "$SCHEMA_FILE" ]; then
+                  echo "Schema-Datei fehlt: $SCHEMA_FILE - ueberspringe $SUBJECT"
+                  continue
+                fi
+
+                echo "--- registriere $SUBJECT aus $SCHEMA_FILE ---"
+                PAYLOAD=$(awk '{printf "%s", $0}' "$SCHEMA_FILE" | sed 's/"/\\"/g')
+                CHECK=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                  -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                  --data "{\"schema\": \"$PAYLOAD\"}" \
+                  "$SR/compatibility/subjects/$SUBJECT/versions/latest?verbose=true")
+
+                if [ "$CHECK" != "404" ] && [ "$CHECK" != "200" ]; then
+                  echo "Kompatibilitaetspruefung fehlgeschlagen fuer $SUBJECT (HTTP $CHECK)"
+                  exit 1
+                fi
+
+                curl -sf -X POST \
+                  -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+                  --data "{\"schema\": \"$PAYLOAD\"}" \
+                  "$SR/subjects/$SUBJECT/versions"
+                echo ""
+                echo "--- registrierte Versionen fuer $SUBJECT ---"
+                curl -sf "$SR/subjects/$SUBJECT/versions"
+                echo ""
+              done
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits:   { cpu: 100m, memory: 128Mi }

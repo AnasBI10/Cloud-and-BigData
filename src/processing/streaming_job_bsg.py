@@ -11,7 +11,11 @@ from pyspark.sql.functions import (
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
 KAFKA_TOPIC_IN = os.environ.get("KAFKA_TOPIC_IN", "traffic.speeds.raw")
 KAFKA_TOPIC_DLQ = os.environ.get("KAFKA_TOPIC_DLQ", "traffic.speeds.dlq")
+KAFKA_TOPIC_WEATHER = os.environ.get("KAFKA_TOPIC_WEATHER", "weather.observations.raw")
 SCHEMA_PATH = os.environ.get("SCHEMA_PATH", "/opt/spark-app/schemas/traffic_speed_event.avsc")
+WEATHER_SCHEMA_PATH = os.environ.get(
+    "WEATHER_SCHEMA_PATH", "/opt/spark-app/schemas/weather_observation_event.avsc"
+)
 SEED_PATH = os.environ.get("SEED_PATH", "/opt/spark-app/data/dot_links_seed.json")
 BASELINE_TABLE_PATH = os.environ.get("BASELINE_TABLE_PATH", "s3a://gold/baseline_profile")
 CHECKPOINT_BASE = os.environ.get("CHECKPOINT_DIR", "/opt/spark-app/checkpoints")
@@ -27,6 +31,10 @@ GOLD_TABLE_PATH = os.environ.get("GOLD_TABLE_PATH", "s3a://gold/congestion_score
 WINDOW_DURATION = "5 minutes"
 WINDOW_SLIDE = "1 minute"
 WATERMARK_DELAY = "2 minutes"
+# Grosszuegiger als WATERMARK_DELAY: Open-Meteo loest nur stuendlich auf und
+# der Poller fragt alle 5 Minuten ab - verspaetete oder ausbleibende
+# Wetter-Batches duerfen den Traffic-Stream nicht blockieren (SCRUM-84).
+WEATHER_WATERMARK_DELAY = "65 minutes"
 CONFLUENT_WIRE_HEADER_BYTES = 5
 
 
@@ -54,6 +62,41 @@ def enrich_with_seed(events: DataFrame, seed: DataFrame) -> DataFrame:
         .withColumn("link_name", coalesce(col("seed_link_name"), col("link_name")))
         .drop("seed_borough", "seed_link_name")
     )
+
+
+def read_weather_stream(spark: SparkSession, weather_schema_json: str) -> DataFrame:
+    """Liest weather.observations.raw und dekodiert das Avro-Payload (SCRUM-84).
+
+    borough/event_key/ingested_at/source kollidieren namentlich mit dem
+    Traffic-Schema, deshalb hier mit weather_-Praefix umbenannt - sonst
+    wirft der spaetere Join einen AMBIGUOUS_REFERENCE-Fehler. Watermark auf
+    observed_at (fachliche Beobachtungszeit), nicht auf ingested_at.
+    """
+    raw = (
+        spark.readStream
+        .format("kafka")
+        .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
+        .option("subscribe", KAFKA_TOPIC_WEATHER)
+        .option("startingOffsets", "earliest")
+        .option("failOnDataLoss", "false")
+        .load()
+    )
+
+    decoded = (
+        raw.select(
+            col("value").substr(CONFLUENT_WIRE_HEADER_BYTES + 1, 1000000).alias("avro_payload"),
+        )
+        .select(from_avro(col("avro_payload"), weather_schema_json).alias("w"))
+        .select("w.*")
+        .withColumnRenamed("borough", "weather_borough")
+        .withColumnRenamed("event_key", "weather_event_key")
+        .withColumnRenamed("ingested_at", "weather_ingested_at")
+        .withColumnRenamed("source", "weather_source")
+        .withColumnRenamed("latitude", "weather_latitude")
+        .withColumnRenamed("longitude", "weather_longitude")
+    )
+
+    return decoded.withWatermark("observed_at", WEATHER_WATERMARK_DELAY)
 
 
 def load_baseline(spark: SparkSession) -> DataFrame:
@@ -104,6 +147,14 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
         )
         return
 
+    # SCRUM-84b: autoMerge aktiviert Schema-Evolution fuer MERGE-Operationen.
+    # Ohne dieses Flag ignoriert Delta neue Spalten aus source (hier: die
+    # Wetter-Felder) beim Merge in eine bereits bestehende Zieltabelle -
+    # anders als beim initialen .write mit mergeSchema=true, das nur beim
+    # allerersten Anlegen der Tabelle greift.
+    batch_df.sparkSession.conf.set(
+        "spark.databricks.delta.schema.autoMerge.enabled", "true"
+    )
     target = DeltaTable.forPath(batch_df.sparkSession, path)
     (
         target.alias("target")
@@ -138,6 +189,15 @@ def build_process_batch(baseline: DataFrame):
                 count("*").alias("sample_count"),
                 first("link_name", ignorenulls=True).alias("link_name"),
                 first("link_points", ignorenulls=True).alias("link_points"),
+                # SCRUM-84b: Wetter-Aggregate aus dem Stream-Stream-Join.
+                # Spaltennamen exakt wie im Gold-Contract (docs/gold-contract.md)
+                # dokumentiert - ohne weather_-Praefix, damit der bestehende
+                # DeltaReader (SCRUM-79) sie ohne Anpassung liest.
+                # avg() ignoriert NULLs automatisch (kein Match gefunden).
+                avg("temperature_c").alias("temperature_c"),
+                avg("precipitation_mm").alias("precipitation_mm"),
+                avg("wind_speed_kmh").alias("wind_speed_kmh"),
+                first("weather_condition", ignorenulls=True).alias("weather_condition"),
             )
             .withColumn("window_date", date_format(col("window_start"), "yyyy-MM-dd"))
             # gleiche berechnung wie in compute_baseline.py, auch keine tz konvertierung
@@ -207,15 +267,42 @@ def main() -> None:
 
     baseline = load_baseline(spark)
 
+    weather_schema_json = read_avro_schema(WEATHER_SCHEMA_PATH)
+    weather = read_weather_stream(spark, weather_schema_json)
+
+    # is_late wird VOR dem Wetter-Join berechnet, tagged_traffic haengt
+    # deshalb ausschliesslich am Traffic-Stream (SCRUM-84 Nachtrag). Grund:
+    # die DLQ-Query weiter unten braucht denselben Source-Count wie ihr
+    # bestehender Checkpoint (late-data-dlq kennt nur 1 Source aus der Zeit
+    # vor dem Wetter-Join). Wuerde late_records aus der bereits gejointen
+    # Query abgeleitet, haette auch die DLQ-Query 2 Sources und der
+    # Checkpoint waere inkompatibel - derselbe AssertionError wie eben bei
+    # bronze-silver-gold, nur fuer eine Query, die inhaltlich gar kein
+    # Wetter braucht.
     late_cutoff = expr(f"current_timestamp() - interval {WATERMARK_DELAY}")
-    tagged = enriched.withColumn("is_late", col("event_time") < late_cutoff)
+    tagged_traffic = enriched.withColumn("is_late", col("event_time") < late_cutoff)
 
+    # Watermark muss vor dem Stream-Stream-Join auf beiden Seiten gesetzt
+    # sein, sonst haelt Spark den Join-State unbegrenzt im Speicher.
+    enriched_watermarked = tagged_traffic.withWatermark("event_time", WATERMARK_DELAY)
 
+    with_weather = (
+        enriched_watermarked.alias("t")
+        .join(
+            weather.alias("w"),
+            expr(
+                "t.borough = w.weather_borough AND "
+                "t.event_time >= w.observed_at AND "
+                "t.event_time < w.observed_at + interval 1 hour"
+            ),
+            "left",
+        )
+        .drop("weather_borough")
+    )
 
     window_col = window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE)
     windowed = (
-        tagged
-        .withWatermark("event_time", WATERMARK_DELAY)
+        with_weather
         .withColumn("window", window_col)
         .withColumn("window_start", col("window.start"))
         .withColumn("window_end", col("window.end"))
@@ -246,7 +333,7 @@ def main() -> None:
         col("source"),
     )
 
-    late_records = tagged.where(col("is_late"))
+    late_records = tagged_traffic.where(col("is_late"))
     dlq_query = (
         late_records
         .select(col("kafka_key"), to_avro(dlq_payload).alias("value"))

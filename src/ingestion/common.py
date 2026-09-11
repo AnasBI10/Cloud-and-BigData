@@ -174,8 +174,13 @@ def build_event(
 class EventPublisher:
     """Duenne Huelle um Producer + AvroSerializer."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, key_field: str = "link_id"):
         self.settings = settings
+        # Feldname, der als Kafka-Message-Key dient. Default "link_id" fuer
+        # den Verkehrsstrom (Partitionierung nach Segment); der Wetter-Poller
+        # uebergibt "borough", da dort borough der Partitionierungsschluessel
+        # ist (siehe weather_observation_event.avsc).
+        self._key_field = key_field
         schema_str = SCHEMA_PATH.read_text(encoding="utf-8")
         registry = SchemaRegistryClient({"url": settings.schema_registry})
         # auto.register.schemas=False: das Schema wurde vom Job in SCRUM-74
@@ -222,14 +227,14 @@ class EventPublisher:
             log.exception("Serialisierung fehlgeschlagen, gehe in die DLQ")
             self._producer.produce(
                 self.settings.dlq_topic,
-                key=self._key_serializer(event.get("link_id", "unknown")),
+                key=self._key_serializer(event.get(self._key_field, "unknown")),
                 value=json.dumps(event, default=str).encode("utf-8"),
             )
             return
 
         self._producer.produce(
             topic,
-            key=self._key_serializer(event["link_id"]),
+            key=self._key_serializer(event[self._key_field]),
             value=payload,
             on_delivery=self._on_delivery,
         )

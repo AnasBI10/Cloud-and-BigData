@@ -103,3 +103,37 @@ spec:
                 name: socrata-credentials
           resources:
             {{- toYaml .Values.producer.live.resources | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-weather
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: producer-weather
+spec:
+  replicas: {{ .Values.producer.weather.replicas }}
+  selector:
+    matchLabels:
+      app: producer-weather
+  template:
+    metadata:
+      labels:
+        app: producer-weather
+    spec:
+      containers:
+        - name: producer
+          image: {{ .Values.producer.image }}
+          args: ["--mode", "weather"]
+          env:
+            - name: MODE
+              value: "weather"
+            - name: TOPIC
+              value: "weather.observations.raw"
+            - name: WEATHER_POLL_INTERVAL_S
+              value: {{ .Values.producer.weather.pollIntervalS | quote }}
+          envFrom:
+            - configMapRef:
+                name: ingestion-config
+          resources:
+            {{- toYaml .Values.producer.weather.resources | nindent 12 }}

@@ -45,7 +45,7 @@ schemaRegistry:
     limits:   { cpu: 250m, memory: 1Gi }
 
 producer:
-  image: congestion-watch/ingestion:0.1.2
+  image: congestion-watch/ingestion:0.1.4
   synthetic:
     replicas: 1
     eventsPerSecond: 20
@@ -61,6 +61,12 @@ producer:
     resources:
       requests: { cpu: 100m, memory: 192Mi }
       limits:   { cpu: 250m, memory: 384Mi }
+  weather:
+    replicas: 1
+    pollIntervalS: 300
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits:   { cpu: 150m, memory: 192Mi }
 
 socrata:
   appToken: "CHANGE_ME"
@@ -95,7 +101,7 @@ ui:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.6.0
+  image: congestion-watch/processing:0.7.3
   checkpointStorage: 1Gi
   resources:
     requests: { cpu: 500m, memory: 1Gi }

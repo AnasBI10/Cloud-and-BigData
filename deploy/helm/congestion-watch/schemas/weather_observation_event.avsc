@@ -1,0 +1,72 @@
+{
+  "type": "record",
+  "name": "WeatherObservationEvent",
+  "namespace": "nyc.congestionwatch.ingest.v1",
+  "doc": "Eine stuendliche Wetterbeobachtung je NYC-Borough. Subject: weather.observations.raw-value. Quelle: Open-Meteo Forecast API (CC BY 4.0).",
+  "fields": [
+    {
+      "name": "borough",
+      "type": "string",
+      "doc": "Stadtbezirk. Gleichzeitig der Kafka-Message-Key: 5 feste Werte, passend zur Partitionsanzahl des Topics. Join-Schluessel gegen den Verkehrsstrom (SCRUM-84)."
+    },
+    {
+      "name": "observed_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Beobachtungszeitpunkt laut Open-Meteo, stuendlich aufgeloest. Event Time fuer den Stream-Stream-Join - nicht die Abrufzeit, damit der Join zeitlich korrekt gegen data_as_of des Verkehrsstroms laeuft."
+    },
+    {
+      "name": "event_key",
+      "type": "string",
+      "doc": "borough + '|' + observed_at als ISO-8601. Eindeutiger Identifier, da Open-Meteo bei wiederholtem Abruf dieselbe Stunde erneut liefert - verhindert Duplikate im Delta-Sink."
+    },
+    {
+      "name": "temperature_c",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Lufttemperatur 2m ueber Grund in Grad Celsius."
+    },
+    {
+      "name": "precipitation_mm",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Niederschlagsmenge der Stunde in Millimetern. Laut DATA_SOURCES.md im beobachteten Zeitraum identisch mit rain, da kein Schnee auftrat."
+    },
+    {
+      "name": "wind_speed_kmh",
+      "type": ["null", "double"],
+      "default": null,
+      "doc": "Windgeschwindigkeit 10m ueber Grund in km/h."
+    },
+    {
+      "name": "weather_condition",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Abgeleitete Textkategorie (clear, cloudy, drizzle, rain, snow). Wird aus precipitation_mm und snowfall gebildet, nicht von Open-Meteo geliefert - Ableitung liegt bewusst im Producer, damit Downstream-Consumer keine eigene Schwellenlogik brauchen."
+    },
+    {
+      "name": "latitude",
+      "type": "double",
+      "doc": "Tatsaechlich vom Modell gelieferter Gitterpunkt, nicht der angefragte Wert. Bei schmalen Bezirken wie Manhattan kann die Abweichung mehrere Kilometer betragen (siehe DATA_SOURCES.md, Einschraenkung)."
+    },
+    {
+      "name": "longitude",
+      "type": "double",
+      "doc": "Analog zu latitude: gelieferter Gitterpunkt."
+    },
+    {
+      "name": "ingested_at",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Processing Time, gesetzt vom Producer. Differenz zu observed_at macht die Aktualitaet des Wettermodells messbar."
+    },
+    {
+      "name": "source",
+      "type": {
+        "type": "enum",
+        "name": "WeatherSource",
+        "symbols": ["OPEN_METEO", "SYNTHETIC"]
+      },
+      "default": "OPEN_METEO",
+      "doc": "Herkunft der Beobachtung. Trennt echte API-Daten von eventuellen Testdaten."
+    }
+  ]
+}

@@ -15,6 +15,7 @@ COPY src/ingestion/*.py /app/
 # des Codevertrags und aendern sich nur mit einem neuen Build. Die ConfigMap
 # ist fuer Betriebsparameter da (SCRUM-81), nicht fuer Artefakte.
 COPY schemas/traffic_speed_event.avsc /app/schemas/traffic_speed_event.avsc
+COPY schemas/weather_observation_event.avsc /app/schemas/weather_observation_event.avsc
 COPY data/dot_links_seed.json /app/data/dot_links_seed.json
 
 # Nicht als root laufen.
