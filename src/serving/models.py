@@ -88,11 +88,6 @@ class Health(BaseModel):
     ingest: str | None = Field(None, description="kafka | dryrun")
 
 
-# ---------------------------------------------------------------------------
-# Einspeisung (SCRUM-89)
-# ---------------------------------------------------------------------------
-
-
 class EventRequest(BaseModel):
     """Ein von Hand erzeugtes Messereignis, entspricht dem Avro-Schema aus SCRUM-74."""
 

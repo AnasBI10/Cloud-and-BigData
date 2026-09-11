@@ -28,8 +28,8 @@ from publisher import (
     IngestError,
     ScenarioRun,
     ScenarioRunner,
+    build_event,
     build_ingest,
-    load_build_event,
     scenario_catalog,
 )
 from readers import ReaderError, TTLCache, build_reader, load_seed, segments_from
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     # Erst beim ersten POST verbinden, sonst haengt der Start der Lese-API
     # an der Verfuegbarkeit von Kafka.
     state["ingest"] = build_ingest(settings.ingest_mode)
-    state["scenarios"] = ScenarioRunner(state["ingest"], load_build_event())
+    state["scenarios"] = ScenarioRunner(state["ingest"], build_event)
 
     ok, detail = state["reader"].probe()
     log.info(
@@ -93,11 +93,6 @@ def _latest() -> list[SegmentWindow]:
     return state["cache"].get(state["reader"].latest_windows)
 
 
-# ---------------------------------------------------------------------------
-# Probes
-# ---------------------------------------------------------------------------
-
-
 @app.get("/health", response_model=Health, tags=["ops"])
 def health() -> Health:
     return Health(
@@ -125,11 +120,6 @@ def ready() -> Health:
     if not ok:
         raise HTTPException(status_code=503, detail=payload.model_dump(mode="json"))
     return payload
-
-
-# ---------------------------------------------------------------------------
-# Query-Endpunkte
-# ---------------------------------------------------------------------------
 
 
 @app.get("/api/anomalies", response_model=AnomalyResponse, tags=["gold"])
@@ -210,11 +200,6 @@ def segments() -> SegmentsResponse:
     )
 
 
-# ---------------------------------------------------------------------------
-# Einspeisung — Rolle Datenlieferant (SCRUM-89)
-# ---------------------------------------------------------------------------
-
-
 def _segment_or_404(link_id: str) -> dict:
     segment = state["by_id"].get(link_id)
     if segment is None:
@@ -276,7 +261,7 @@ def publish_event(request: EventRequest) -> EventAck:
     if late:
         note = "Verspaetetes Event. Geht in die DLQ (traffic.speeds.dlq), nicht in die Aggregation."
 
-    event = load_build_event()(
+    event = build_event(
         link_id=request.link_id,
         data_as_of=data_as_of,
         status=status_code,

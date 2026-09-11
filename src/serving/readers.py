@@ -12,6 +12,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
+import pyarrow.dataset as pads
+from deltalake import DeltaTable
+
 from config import Settings
 from models import Segment, SegmentWindow
 
@@ -76,11 +79,6 @@ def _stable_fraction(*parts: str) -> float:
 def floor_window(ts: datetime) -> datetime:
     minute = (ts.minute // WINDOW_MINUTES) * WINDOW_MINUTES
     return ts.replace(minute=minute, second=0, microsecond=0)
-
-
-# ---------------------------------------------------------------------------
-# Fixture
-# ---------------------------------------------------------------------------
 
 
 class FixtureReader:
@@ -199,19 +197,9 @@ class FixtureReader:
         return True, f"Fixture-Modus, {len(self.seed)} Segmente aus dem Seed"
 
 
-# ---------------------------------------------------------------------------
-# Baseline
-# ---------------------------------------------------------------------------
-
-
 class BaselineIndex:
-    """Erwartungswert und Streuung je ``link_id`` x Wochentag x Stunde.
-
-    Zusaetzlich zwei Fragen, die die Gold-Tabelle allein nicht beantwortet:
-    welche Segmente ueberhaupt bewertbar sind (``links()``, fuer die Karte)
-    und welche Geschwindigkeit fuer eine Stunde ueblich ist (``lookup()``,
-    fuer den Szenario-Generator).
-    """
+    """Erwartungswert und Streuung je link_id x Wochentag x Stunde, aus
+    baseline_profile gelesen und gecacht."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -225,11 +213,6 @@ class BaselineIndex:
         return (ts.isoweekday() % 7) + 1
 
     def _load(self) -> dict[tuple[str, int, int], tuple[float, float]]:
-        try:
-            from deltalake import DeltaTable
-        except ImportError as exc:  # pragma: no cover
-            raise ReaderError("deltalake nicht installiert") from exc
-
         try:
             dt = DeltaTable(
                 self.settings.baseline_uri,
@@ -293,11 +276,6 @@ def _as_utc(ts: datetime) -> datetime:
     return ts.astimezone(timezone.utc)
 
 
-# ---------------------------------------------------------------------------
-# Delta
-# ---------------------------------------------------------------------------
-
-
 class DeltaReader:
     """Liest die Gold-Tabelle von MinIO. Der Streaming-Job schreibt Baseline-
     Join und Score selbst (SCRUM-83); die API liest die Spalten nur, wie sie
@@ -335,17 +313,11 @@ class DeltaReader:
 
     def _table(self):
         try:
-            from deltalake import DeltaTable
-        except ImportError as exc:  # pragma: no cover
-            raise ReaderError("deltalake nicht installiert") from exc
-        try:
             return DeltaTable(self.settings.delta_uri, storage_options=self._storage)
         except Exception as exc:
             raise ReaderError(f"Delta-Tabelle nicht lesbar: {exc}") from exc
 
     def _query(self, since: datetime, link_id: str | None = None) -> list[dict]:
-        import pyarrow.dataset as pads
-
         dt = self._table()
         dataset = dt.to_pyarrow_dataset()
         available = set(dataset.schema.names)

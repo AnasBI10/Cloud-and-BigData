@@ -1,4 +1,14 @@
-"""Einspeisung von UI-Events in die Ingestion (SCRUM-89)
+"""Einspeisung von UI-Events in die Ingestion (SCRUM-89).
+
+Ein hier erzeugtes Event geht durch denselben Pfad wie eine echte
+DOT-Messung: Avro gegen die Schema-Registry, nach traffic.speeds.raw, von
+dort in den Spark-Job und ueber Bronze/Silver/Gold zurueck ins Dashboard.
+
+Importiert src/ingestion/common.py statt es nachzubauen — Serialisierung,
+Registry-Anbindung und der Bau des event_key bleiben an einer Stelle.
+
+Zwei Modi: INGEST_MODE=kafka (Abgabestand) und dryrun (Entwicklung ohne
+Kafka, zaehlt nur mit, stellt nicht zu).
 """
 
 from __future__ import annotations
@@ -15,6 +25,7 @@ from typing import Any, Callable
 log = logging.getLogger("serving.publisher")
 
 # common.py liegt im Repo unter src/ingestion, im Image daneben unter /app.
+# Muss vor dem Import unten stehen, damit common.py gefunden wird.
 _CANDIDATES = [
     pathlib.Path(__file__).resolve().parent,
     pathlib.Path(__file__).resolve().parents[1] / "ingestion",
@@ -24,22 +35,12 @@ for _d in _CANDIDATES:
         sys.path.insert(0, str(_d))
         break
 
-
-def load_build_event() -> Callable[..., dict]:
-    """Spaeter Import: common.py zieht confluent_kafka nach, die
-    Lese-Endpunkte sollen ohne diese Abhaengigkeit starten koennen."""
-    from common import build_event
-
-    return build_event
+from common import EventPublisher, Settings as IngestSettings, build_event  # noqa: E402
 
 
 class IngestError(RuntimeError):
     """Einspeisung nicht moeglich. Fuehrt zu 503."""
 
-
-# ---------------------------------------------------------------------------
-# Szenarien
-# ---------------------------------------------------------------------------
 
 # Ein einzelnes Event verschiebt einen 5-Minuten-Fenstermittelwert kaum
 # sichtbar — Szenarien erzeugen eine Folge von Events ueber mehrere Minuten.
@@ -79,11 +80,6 @@ def scenario_catalog() -> list[dict[str, str]]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Einspeisung
-# ---------------------------------------------------------------------------
-
-
 class KafkaIngest:
     name = "kafka"
 
@@ -97,8 +93,6 @@ class KafkaIngest:
             if self._publisher is not None:
                 return self._publisher
             try:
-                from common import EventPublisher, Settings as IngestSettings
-
                 self._settings = IngestSettings.from_env()
                 self._publisher = EventPublisher(self._settings)
                 log.info(
@@ -168,11 +162,6 @@ def build_ingest(mode: str):
     return DryRunIngest()
 
 
-# ---------------------------------------------------------------------------
-# Szenario-Laeufe
-# ---------------------------------------------------------------------------
-
-
 class ScenarioRun:
     """Zustand eines Szenarios. Lebt im Prozess, wird nicht geteilt — bei
     mehreren Repliken kennt ihn nur der Pod, der ihn faehrt."""
@@ -227,7 +216,7 @@ class ScenarioRunner:
 
     MAX_KEPT = 20
 
-    def __init__(self, ingest, build_event_fn: Callable[..., dict]):
+    def __init__(self, ingest, build_event_fn: Callable[..., dict] = build_event):
         self.ingest = ingest
         self._build_event = build_event_fn
         self.runs: dict[str, ScenarioRun] = {}
