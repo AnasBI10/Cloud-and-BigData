@@ -218,6 +218,17 @@ select.mini { font-size: 12px; padding: 4px 7px; }
 
 .map-empty { fill: var(--muted); font-size: 15px; }
 
+.borough-label {
+  fill: #b7c2bd;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-anchor: middle;
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+
 .tip {
   position: absolute;
   pointer-events: none;

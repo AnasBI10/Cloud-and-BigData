@@ -22,6 +22,8 @@ async function init() {
   $("borough-filter").addEventListener("change", refreshRanking);
   $("chart-hours").addEventListener("change", () => selected && selectSegment(selected));
 
+  renderChartPlaceholder("Segment auf der Karte oder in der Rangliste anklicken.");
+
   await loadSegments();
   await refreshRanking();
 
@@ -107,6 +109,7 @@ function buildMap() {
   }
 
   project = makeProjection(usable.flatMap((g) => g.pts));
+  addBoroughLabels(usable, svg);
 
   for (const { s, pts } of usable) {
     const d = pts
@@ -121,6 +124,28 @@ function buildMap() {
     path.addEventListener("mouseleave", hideTip);
     svg.appendChild(path);
     paths.set(s.link_id, path);
+  }
+}
+
+// Gibt der Karte geografischen Kontext, ohne einen externen Kartendienst zu
+// laden -- Zentroid je Borough aus den vorhandenen Segmentpunkten.
+function addBoroughLabels(geo, svg) {
+  const points = new Map();
+  for (const { s, pts } of geo) {
+    if (!s.borough) continue;
+    if (!points.has(s.borough)) points.set(s.borough, []);
+    points.get(s.borough).push(...pts);
+  }
+  for (const [borough, pts] of points) {
+    const lat = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    const lon = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const [x, y] = project(lat, lon);
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", x.toFixed(1));
+    text.setAttribute("y", y.toFixed(1));
+    text.setAttribute("class", "borough-label");
+    text.textContent = borough;
+    svg.appendChild(text);
   }
 }
 
@@ -254,6 +279,11 @@ async function selectSegment(linkId, { keepScroll = false } = {}) {
   }
   renderChart(data.points);
   if (!keepScroll) $("chart-wrap").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function renderChartPlaceholder(message) {
+  $("chart").innerHTML =
+    `<text x="500" y="160" text-anchor="middle" class="map-empty">${escapeHtml(message)}</text>`;
 }
 
 function renderChart(points) {

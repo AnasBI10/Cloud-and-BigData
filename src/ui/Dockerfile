@@ -6,7 +6,7 @@ USER root
 
 COPY src/ui/nginx.conf /etc/nginx/conf.d/default.conf
 
-COPY src/ui/index.html src/ui/dashboard.html src/ui/styles.css \
+COPY src/ui/index.html src/ui/ingest.html src/ui/styles.css \
      /usr/share/nginx/html/
 COPY src/ui/js/ /usr/share/nginx/html/js/
 COPY src/ui/config.js /usr/share/nginx/html/config.js
