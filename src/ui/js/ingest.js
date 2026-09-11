@@ -132,7 +132,7 @@ function updatePlan() {
   const minutes = Number($("sc-minutes").value || 0);
   const rate = Number($("sc-rate").value || 0);
   $("sc-plan").textContent =
-    `${minutes * rate} Events ueber ${minutes} Minuten. Sichtbar fruehestens nach ` +
+    `${minutes * rate} Events über ${minutes} Minuten. Sichtbar frühestens nach ` +
     "etwa eineinhalb Minuten.";
 }
 
@@ -167,7 +167,7 @@ function renderRun(run, note = "") {
   const done = run.published_events;
   const percent = Math.round((done / run.planned_events) * 100);
   const label =
-    { running: "laeuft", done: "abgeschlossen", failed: "fehlgeschlagen", cancelled: "abgebrochen" }[
+    { running: "läuft", done: "abgeschlossen", failed: "fehlgeschlagen", cancelled: "abgebrochen" }[
       run.state
     ] || run.state;
   ok(
@@ -200,8 +200,8 @@ function followRun(run, button) {
       renderRun(
         run,
         err.status === 404
-          ? "Fortschritt nicht abfragbar: der Lauf laeuft auf einem anderen Pod. " +
-              "Er laeuft trotzdem weiter — im Dashboard nachsehen."
+          ? "Fortschritt nicht abfragbar: der Lauf läuft auf einem anderen Pod. " +
+              "Er läuft trotzdem weiter — im Dashboard nachsehen."
           : err.message
       );
     }

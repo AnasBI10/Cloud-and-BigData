@@ -66,7 +66,7 @@ socrata:
   appToken: "CHANGE_ME"
 
 serving:
-  image: congestion-watch/serving:0.2.0
+  image: congestion-watch/serving:0.2.1
   # Auf die tatsaechliche UI-Origin eingrenzen, sobald der Ingress-Host
   # feststeht (z. B. "http://congestion-watch.example"). Siehe Kommentar in
   # templates/serving.yaml.
@@ -81,7 +81,7 @@ serving:
     host: ""
 
 ui:
-  image: congestion-watch/ui:0.1.0
+  image: congestion-watch/ui:0.1.1
   replicas: 2
   port: 8080
   # Leer = gleiche Herkunft. Nur setzen, wenn die API unter einer anderen

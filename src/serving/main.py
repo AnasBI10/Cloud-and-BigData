@@ -259,7 +259,7 @@ def publish_event(request: EventRequest) -> EventAck:
         )
 
     if late:
-        note = "Verspaetetes Event. Geht in die DLQ (traffic.speeds.dlq), nicht in die Aggregation."
+        note = "Verspätetes Event. Geht in die DLQ (traffic.speeds.dlq), nicht in die Aggregation."
 
     event = build_event(
         link_id=request.link_id,

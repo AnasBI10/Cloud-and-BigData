@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NYC Congestion Watch — Einspeisung</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314507a'/><path d='M3 11h10M3 8h7M3 5h4' stroke='white' stroke-width='1.6' stroke-linecap='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2308312A'/><path d='M3 11h10M3 8h7M3 5h4' stroke='%2300E47C' stroke-width='1.6' stroke-linecap='round'/></svg>">
   <!-- Laufzeitkonfiguration. Im Container aus der Umgebung erzeugt (SCRUM-91),
-       damit dasselbe Image lokal und im Cluster laeuft. -->
+       damit dasselbe Image lokal und im Cluster läuft. -->
   <script src="config.js"></script>
 </head>
 <body>
@@ -44,7 +44,7 @@
           <legend>Sensorstatus</legend>
           <label class="radio">
             <input type="radio" name="status" value="0" checked>
-            <span><strong>0</strong> — gueltige Messung</span>
+            <span><strong>0</strong> — gültige Messung</span>
           </label>
           <label class="radio">
             <input type="radio" name="status" value="-101">
@@ -65,18 +65,18 @@
 
         <details>
           <summary>Weitere Felder</summary>
-          <label>Fahrzeit ueber das Segment (optional)
+          <label>Fahrzeit über das Segment (optional)
             <input type="number" id="ev-travel" min="0" step="1" placeholder="Sekunden">
           </label>
           <label>Messzeitpunkt (optional, Ortszeit des Browsers)
             <input type="datetime-local" id="ev-time">
-            <span class="hint">Wird als UTC gesendet. Liegt er weiter zurueck
+            <span class="hint">Wird als UTC gesendet. Liegt er weiter zurück
               als die Watermark des Spark-Jobs (2 Minuten), lehnt die API ab —
-              es sei denn, verspaetete Events sind unten zugelassen.</span>
+              es sei denn, verspätete Events sind unten zugelassen.</span>
           </label>
           <label class="check">
             <input type="checkbox" id="ev-late">
-            <span>Verspaetetes Event zulassen — landet dann in der DLQ statt in
+            <span>Verspätetes Event zulassen — landet dann in der DLQ statt in
               der Aggregation (SCRUM-85).</span>
           </label>
         </details>
@@ -91,8 +91,8 @@
       <h2>Szenario</h2>
       <p class="hint">
         Ein einzelnes Event verschiebt einen Fenstermittelwert kaum sichtbar.
-        Ein Szenario schickt eine Folge von Events in Echtzeit — rueckdatieren
-        geht nicht, der Spark-Job wuerde sie als verspaetet aussortieren.
+        Ein Szenario schickt eine Folge von Events in Echtzeit — rückdatieren
+        geht nicht, der Spark-Job würde sie als verspätet aussortieren.
       </p>
       <form id="scenario-form">
         <label>Segment

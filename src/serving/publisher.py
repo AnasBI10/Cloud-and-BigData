@@ -47,7 +47,7 @@ class IngestError(RuntimeError):
 SCENARIOS: dict[str, dict[str, Any]] = {
     "congestion": {
         "beschreibung": (
-            "Geschwindigkeit faellt linear auf 30 % des Ausgangswerts. "
+            "Geschwindigkeit fällt linear auf 30 % des Ausgangswerts. "
             "congestion_score steigt, das Segment wandert in die Rangliste."
         ),
         "status": 0,
@@ -55,7 +55,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
     },
     "recovery": {
         "beschreibung": (
-            "Gegenstueck zu congestion: von 30 % zurueck auf den Ausgangswert."
+            "Gegenstück zu congestion: von 30 % zurück auf den Ausgangswert."
         ),
         "status": 0,
         "speed_factor": lambda p: 0.3 + 0.7 * p,

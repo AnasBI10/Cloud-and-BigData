@@ -62,7 +62,7 @@ function buildBoroughFilter() {
   }
 }
 
-// Web-Mercator, skaliert auf die Bounding Box der tatsaechlichen Segmente.
+// Web-Mercator, skaliert auf die Bounding Box der tatsächlichen Segmente.
 function makeProjection(points) {
   const merc = (lat) =>
     (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 180 / 2));
@@ -323,7 +323,7 @@ function renderChart(points) {
   }
   add("text", { x: 4, y: 12 }, "axis").textContent = "mph";
 
-  // Luecken > 1.5 Fenster werden nicht ueberbrueckt.
+  // Lücken > 1.5 Fenster werden nicht überbrückt.
   const runs = [];
   let run = [];
   for (const r of rows) {
