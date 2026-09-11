@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NYC Congestion Watch — Einspeisung</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2308312A'/><path d='M3 11h10M3 8h7M3 5h4' stroke='%2300E47C' stroke-width='1.6' stroke-linecap='round'/></svg>">
+  <!-- Laufzeitkonfiguration. Im Container aus der Umgebung erzeugt (SCRUM-91),
+       damit dasselbe Image lokal und im Cluster läuft. -->
+  <script src="config.js"></script>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>NYC Congestion Watch</h1>
+    <nav>
+      <a href="index.html" class="active">Einspeisung</a>
+      <a href="dashboard.html">Dashboard</a>
+    </nav>
+    <span id="api-status" class="status" title="Zustand der Serving-API">API …</span>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="lead">
+    Rolle <strong>Datenlieferant</strong>. Was hier erzeugt wird, geht nach
+    Kafka (<code>traffic.speeds.raw</code>), Avro-serialisiert gegen die
+    Schema-Registry — denselben Weg, den eine echte DOT-Messung nimmt. Nichts
+    davon wird direkt in die Auswertung geschrieben.
+  </p>
+
+  <div class="cols">
+    <!-- ------------------------------------------------------------ -->
+    <section class="card">
+      <h2>Einzelnes Event</h2>
+      <form id="event-form">
+        <label>Segment
+          <select id="ev-link" required></select>
+        </label>
+        <p id="ev-context" class="hint">&nbsp;</p>
+
+        <fieldset>
+          <legend>Sensorstatus</legend>
+          <label class="radio">
+            <input type="radio" name="status" value="0" checked>
+            <span><strong>0</strong> — gültige Messung</span>
+          </label>
+          <label class="radio">
+            <input type="radio" name="status" value="-101">
+            <span><strong>-101</strong> — Sentinel. Wird in Silver verworfen
+              und erreicht die Auswertung nie.</span>
+          </label>
+        </fieldset>
+
+        <div id="ev-speed-row">
+          <label>Geschwindigkeit
+            <span class="row">
+              <input type="range" id="ev-speed-range" min="1" max="70" step="0.5" value="12">
+              <input type="number" id="ev-speed" min="0" max="120" step="0.1" value="12" required>
+              <span class="unit">mph</span>
+            </span>
+          </label>
+        </div>
+
+        <details>
+          <summary>Weitere Felder</summary>
+          <label>Fahrzeit über das Segment (optional)
+            <input type="number" id="ev-travel" min="0" step="1" placeholder="Sekunden">
+          </label>
+          <label>Messzeitpunkt (optional, Ortszeit des Browsers)
+            <input type="datetime-local" id="ev-time">
+            <span class="hint">Wird als UTC gesendet. Liegt er weiter zurück
+              als die Watermark des Spark-Jobs (2 Minuten), lehnt die API ab —
+              es sei denn, verspätete Events sind unten zugelassen.</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="ev-late">
+            <span>Verspätetes Event zulassen — landet dann in der DLQ statt in
+              der Aggregation (SCRUM-85).</span>
+          </label>
+        </details>
+
+        <button type="submit">Event senden</button>
+      </form>
+      <output id="ev-result" class="result"></output>
+    </section>
+
+    <!-- ------------------------------------------------------------ -->
+    <section class="card">
+      <h2>Szenario</h2>
+      <p class="hint">
+        Ein einzelnes Event verschiebt einen Fenstermittelwert kaum sichtbar.
+        Ein Szenario schickt eine Folge von Events in Echtzeit — rückdatieren
+        geht nicht, der Spark-Job würde sie als verspätet aussortieren.
+      </p>
+      <form id="scenario-form">
+        <label>Segment
+          <select id="sc-link" required></select>
+        </label>
+        <label>Verlauf
+          <select id="sc-kind" required></select>
+        </label>
+        <p id="sc-desc" class="hint">&nbsp;</p>
+
+        <div class="row">
+          <label>Dauer
+            <span class="row"><input type="number" id="sc-minutes" min="1" max="60" value="6"><span class="unit">min</span></span>
+          </label>
+          <label>Frequenz
+            <span class="row"><input type="number" id="sc-rate" min="1" max="60" value="12"><span class="unit">Events/min</span></span>
+          </label>
+        </div>
+        <p class="hint" id="sc-plan">&nbsp;</p>
+
+        <button type="submit">Szenario starten</button>
+      </form>
+      <output id="sc-result" class="result"></output>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Verkehrsdaten: <a href="https://data.cityofnewyork.us/d/i4gi-tjb9" rel="noopener">NYC Open Data — DOT Traffic Speeds (i4gi-tjb9)</a>,
+      aggregiert auf 5-Minuten-Fenster.
+      Wetterdaten: <a href="https://open-meteo.com/" rel="noopener">Open-Meteo</a>,
+      lizenziert unter <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>.
+    </p>
+    <p class="small">NYC Congestion Watch — studentischer Prototyp, keine Verkehrsauskunft.</p>
+  </div>
+</footer>
+
+<script type="module" src="js/ingest.js"></script>
+</body>
+</html>
