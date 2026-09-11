@@ -59,12 +59,13 @@ def parse_ts(value: str | None) -> datetime | None:
     return None
 
 
-def fetch_page(offset: int) -> list[dict]:
+def fetch_page(cursor: str) -> list[dict]:
+    # $offset-Pagination wird bei SODA2 ab grosser Tiefe instabil (HTTP 500) --
+    # deshalb Cursor auf data_as_of statt Offset, kein Tiefenlimit.
     params = {
-        "$where": f"data_as_of > '{FROM_DATE}' AND status='0'",
+        "$where": f"data_as_of >= '{cursor}' AND status='0'",
         "$order": "data_as_of",
         "$limit": PAGE_SIZE,
-        "$offset": offset,
     }
     url = f"{SOCRATA_ENDPOINT}?{urlencode(params)}"
     request = urllib.request.Request(url)
@@ -96,10 +97,10 @@ def main() -> None:
     spark = build_spark()
     spark.sparkContext.setLogLevel("WARN")
 
-    offset = 0
+    cursor = FROM_DATE
     total = 0
     while True:
-        page = fetch_page(offset)
+        page = fetch_page(cursor)
         if not page:
             break
         rows = [to_row(r) for r in page]
@@ -112,10 +113,11 @@ def main() -> None:
             .save(SILVER_TABLE_PATH)
         )
         total += len(rows)
-        print(f"Backfill: {len(rows)} Zeilen geschrieben (offset {offset}), gesamt {total}")
-        if len(page) < PAGE_SIZE:
+        print(f"Backfill: {len(rows)} Zeilen geschrieben (Cursor {cursor}), gesamt {total}")
+        next_cursor = page[-1]["data_as_of"]
+        if next_cursor == cursor or len(page) < PAGE_SIZE:
             break
-        offset += PAGE_SIZE
+        cursor = next_cursor
 
     print(f"Backfill abgeschlossen: {total} Zeilen seit {FROM_DATE} nach {SILVER_TABLE_PATH}")
 
