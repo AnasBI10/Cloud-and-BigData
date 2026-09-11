@@ -26,14 +26,19 @@ def main() -> int:
 
     if settings.mode == "synthetic":
         import synthetic
-
         synthetic.run(settings)
+
+    elif settings.mode == "weather":
+        import weather
+        
+        weather.run(settings)
+
     elif settings.mode == "live":
         import live_poller
 
         live_poller.run(settings)
     else:
-        log.error("Unbekannter MODE=%r, erlaubt: synthetic | live", settings.mode)
+        log.error("Unbekannter MODE=%r, erlaubt: synthetic | live | weather", settings.mode)
         return 2
     return 0
 
