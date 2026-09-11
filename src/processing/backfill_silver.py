@@ -3,6 +3,7 @@ in die Silver-Schicht (Kappa-Ausnahme, siehe DATA_SOURCES.md)."""
 
 import json
 import os
+import time
 import urllib.request
 from datetime import datetime
 from urllib.parse import urlencode
@@ -71,8 +72,20 @@ def fetch_page(cursor: str) -> list[dict]:
     request = urllib.request.Request(url)
     if APP_TOKEN:
         request.add_header("X-App-Token", APP_TOKEN)
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read())
+
+    # Socrata liefert vereinzelt transiente 500er (siehe DATA_SOURCES.md,
+    # Cache-Verhalten), mit Backoff erneut versuchen statt abzubrechen.
+    last_error = None
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            wait = 5 * (attempt + 1)
+            print(f"Socrata-Fehler {exc.code} bei Cursor {cursor}, Versuch {attempt + 1}/5, warte {wait}s")
+            time.sleep(wait)
+    raise last_error
 
 
 def to_row(record: dict) -> tuple:
