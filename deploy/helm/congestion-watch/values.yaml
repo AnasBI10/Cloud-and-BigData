@@ -81,7 +81,7 @@ serving:
     host: ""
 
 ui:
-  image: congestion-watch/ui:0.1.1
+  image: congestion-watch/ui:0.1.2
   replicas: 2
   port: 8080
   # Leer = gleiche Herkunft. Nur setzen, wenn die API unter einer anderen
