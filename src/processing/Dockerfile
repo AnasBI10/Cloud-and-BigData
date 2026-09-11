@@ -5,6 +5,7 @@ WORKDIR /opt/spark-app
 
 COPY src/processing/streaming_job_bsg.py ./streaming_job_bsg.py
 COPY src/processing/compute_baseline.py ./compute_baseline.py
+COPY src/processing/backfill_silver.py ./backfill_silver.py
 COPY schemas/traffic_speed_event.avsc ./schemas/traffic_speed_event.avsc
 COPY data/dot_links_seed.json ./data/dot_links_seed.json
 

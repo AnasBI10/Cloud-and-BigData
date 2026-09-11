@@ -132,14 +132,22 @@ nicht als gemessenen Wert.
 (`dot_baseline_full.parquet`) ist nicht mehr auffindbar — weder im Repo noch
 auf einer der Cluster-Instanzen.
 
-**Neue Strategie:** Kein separater Bulk-Export mehr. Der Live-Poller
-(`producer-live`) und der synthetische Producer (`producer-synthetic`) laufen
-seit dem Cluster-Deployment ohnehin kontinuierlich und befüllen die
-Silver-Schicht (`s3a://bronze/traffic_speeds_valid`, bereits `status=0`-gefiltert)
-über denselben Codepfad wie der Live-Betrieb. `src/processing/compute_baseline.py`
-aggregiert direkt daraus `link_id × Wochentag × Stunde` und schreibt
-`s3a://gold/baseline_profile`. Kappa-konsequent (README 3.1: „Historie ist nur
-ein langsamer Stream") und ohne zusätzliches Tool.
+**Zweiter Strategiewechsel (11.09.2026):** Reiner Live-Aufbau der Baseline
+(vorheriger Absatz) ist korrekt, aber langsam — volle Wochentag×Stunde-
+Abdeckung braucht eine volle Woche Laufzeit. Für eine heute vorführbare
+Anwendung reicht das nicht. `src/processing/backfill_silver.py` lädt daher
+einmalig echte historische Messungen (ab 21.07.2026) direkt von Socrata in
+`s3a://bronze/traffic_speeds_valid` nach,  bewusst am Streaming-Pfad vorbei,
+kein Dauerbetrieb, kein CronJob. Danach liefert `compute_baseline.py` sofort
+Zellen für praktisch jede Wochentag×Stunde-Kombination. Echte Daten aus
+derselben geprüften Quelle (Abschnitt 1), nur einmalig per Batch statt über
+Kafka nachgezogen — die einzige Abweichung vom Kappa-Prinzip in diesem
+Projekt, hier bewusst und dokumentiert in Kauf genommen.
+
+Der Live-Poller (`producer-live`) und der synthetische Producer
+(`producer-synthetic`) laufen unverändert weiter und befüllen dieselbe
+Silver-Schicht kontinuierlich über den echten Streaming-Pfad — der Backfill
+ersetzt das nicht, er überbrückt nur die Anlaufzeit.
 
 Der synthetische Producer wurde nicht zufällig mit einem Tagesgang gebaut
 (`HOURLY_FACTOR` in `src/ingestion/synthetic.py`) — genau damit die Baseline
