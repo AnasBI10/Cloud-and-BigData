@@ -130,7 +130,7 @@ Abschnitt 1.2) — eine fremde Zahl über nicht genutzte Daten wäre kein ehrlic
 | Meldefrequenz je Sensor, DOT-Feed | ~alle 7,7 Minuten (23.394 ÷ 125) |
 | Poll-Intervall Wetter | 5 Minuten je Borough |
 | Cache-Staleness DOT-Feed | beobachtet bis zu ~3 Stunden zwischen Antwortzeit und `Truth-Last-Modified` |
-| Ziel-Latenz Ende-zu-Ende (Event → Dashboard) | [zu messen, sobald SCRUM-77 läuft] |
+| Ziel-Latenz Ende-zu-Ende (Event → Dashboard) | Nicht systematisch gemessen; qualitativ unter 5 Minuten, siehe Kapitel 12 |
 
 Der Cache-Staleness-Befund ist praktisch relevant, nicht nur akademisch: Der
 SODA2-Endpunkt liefert laut Response-Header (`X-SODA2-Data-Out-Of-Date: true`)
