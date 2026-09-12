@@ -1,11 +1,12 @@
 import { api, showApiStatus, timeNYC } from "./api.js";
+import { BOUNDS, LAND, WATER, LABELS } from "./basemap.js";
 
 const $ = (id) => document.getElementById(id);
 
 const POLL_MS = 20000;
 const MIN_SCORE = 2.0;
 
-const MAP = { w: 1000, h: 700, pad: 24 };
+const MAP_W = 1000;
 const CHART = { w: 1000, h: 320, l: 46, r: 12, t: 26, b: 26 };
 const WINDOW_MS = 5 * 60 * 1000;
 
@@ -64,24 +65,24 @@ function buildBoroughFilter() {
   }
 }
 
-// Web-Mercator, skaliert auf die Bounding Box der tatsächlichen Segmente.
-function makeProjection(points) {
+
+function makeProjection() {
   const merc = (lat) =>
     (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 180 / 2));
-  const lons = points.map((p) => p[1]);
-  const ys = points.map((p) => merc(p[0]));
-  const [lon0, lon1] = [Math.min(...lons), Math.max(...lons)];
-  const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  const { latMin, latMax, lonMin, lonMax } = BOUNDS;
+  const y1 = merc(latMax);
+  const scale = MAP_W / (lonMax - lonMin);
+  const height = (y1 - merc(latMin)) * scale;
+  const project = (lat, lon) => [(lon - lonMin) * scale, (y1 - merc(lat)) * scale];
+  return { project, height };
+}
 
-  const inner = { w: MAP.w - 2 * MAP.pad, h: MAP.h - 2 * MAP.pad };
-  const scale = Math.min(inner.w / (lon1 - lon0), inner.h / (y1 - y0));
-  const offX = MAP.pad + (inner.w - (lon1 - lon0) * scale) / 2;
-  const offY = MAP.pad + (inner.h - (y1 - y0) * scale) / 2;
-
-  return (lat, lon) => [
-    offX + (lon - lon0) * scale,
-    offY + (y1 - merc(lat)) * scale,
-  ];
+function ringToPath(ring) {
+  return (
+    ring
+      .map((p, i) => (i ? "L" : "M") + project(p[0], p[1]).map((n) => n.toFixed(1)).join(" "))
+      .join(" ") + " Z"
+  );
 }
 
 function parsePoints(raw) {
@@ -93,59 +94,59 @@ function parsePoints(raw) {
   return out;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgEl(tag, attrs, cls) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (cls) el.setAttribute("class", cls);
+  return el;
+}
+
 function buildMap() {
   const svg = $("map");
   svg.innerHTML = "";
   paths = new Map();
 
+  const proj = makeProjection();
+  project = proj.project;
+  svg.setAttribute("viewBox", `0 0 ${MAP_W} ${proj.height.toFixed(0)}`);
+
+  svg.appendChild(svgEl("rect", { x: 0, y: 0, width: MAP_W, height: proj.height }, "water"));
+  for (const area of LAND) svg.appendChild(svgEl("path", { d: ringToPath(area.ring) }, "land"));
+  for (const area of WATER) svg.appendChild(svgEl("path", { d: ringToPath(area.ring) }, "waterbody"));
+
+  for (const label of LABELS) {
+    const [x, y] = project(label.lat, label.lon);
+    const text = svgEl("text", { x: x.toFixed(1), y: y.toFixed(1) }, "borough-label");
+    text.textContent = label.name;
+    svg.appendChild(text);
+  }
+
   const geo = segments.map((s) => ({ s, pts: parsePoints(s.link_points) }));
   const usable = geo.filter((g) => g.pts.length >= 2);
   if (!usable.length) {
-    svg.innerHTML =
-      '<text x="500" y="340" text-anchor="middle" class="map-empty">' +
-      "Keine Segmentgeometrie vorhanden (link_points leer)." +
-      "</text>";
+    const text = svgEl(
+      "text",
+      { x: MAP_W / 2, y: proj.height / 2, "text-anchor": "middle" },
+      "map-empty"
+    );
+    text.textContent = "Keine Segmentgeometrie vorhanden (link_points leer).";
+    svg.appendChild(text);
     return;
   }
-
-  project = makeProjection(usable.flatMap((g) => g.pts));
-  addBoroughLabels(usable, svg);
 
   for (const { s, pts } of usable) {
     const d = pts
       .map((p, i) => (i ? "L" : "M") + project(p[0], p[1]).map((n) => n.toFixed(1)).join(" "))
       .join(" ");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", d);
-    path.setAttribute("class", "seg");
+    const path = svgEl("path", { d }, "seg");
     path.dataset.linkId = s.link_id;
     path.addEventListener("click", () => selectSegment(s.link_id));
     path.addEventListener("mousemove", (e) => showTip(e, s.link_id));
     path.addEventListener("mouseleave", hideTip);
     svg.appendChild(path);
     paths.set(s.link_id, path);
-  }
-}
-
-// Gibt der Karte geografischen Kontext, ohne einen externen Kartendienst zu
-// laden -- Zentroid je Borough aus den vorhandenen Segmentpunkten.
-function addBoroughLabels(geo, svg) {
-  const points = new Map();
-  for (const { s, pts } of geo) {
-    if (!s.borough) continue;
-    if (!points.has(s.borough)) points.set(s.borough, []);
-    points.get(s.borough).push(...pts);
-  }
-  for (const [borough, pts] of points) {
-    const lat = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-    const lon = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
-    const [x, y] = project(lat, lon);
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", x.toFixed(1));
-    text.setAttribute("y", y.toFixed(1));
-    text.setAttribute("class", "borough-label");
-    text.textContent = borough;
-    svg.appendChild(text);
   }
 }
 
