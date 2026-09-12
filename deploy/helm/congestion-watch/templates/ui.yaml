@@ -15,7 +15,7 @@ metadata:
   labels:
     app: ui
 spec:
-  replicas: {{ .Values.ui.replicas }}
+  # Repliken steuert die HPA am Ende dieser Datei.
   selector:
     matchLabels:
       app: ui
@@ -82,3 +82,24 @@ spec:
                 port:
                   number: 80
 {{- end }}
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ui
+  namespace: {{ .Values.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ui
+  minReplicas: {{ .Values.ui.hpa.minReplicas }}
+  maxReplicas: {{ .Values.ui.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ui.hpa.targetCPUUtilization }}

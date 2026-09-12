@@ -35,7 +35,7 @@ metadata:
   labels:
     app: serving-api
 spec:
-  replicas: {{ .Values.serving.replicas }}
+  # Repliken steuert die HPA am Ende dieser Datei.
   selector:
     matchLabels:
       app: serving-api
@@ -102,3 +102,24 @@ spec:
                   number: 80
           {{- end }}
 {{- end }}
+---
+#
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: serving-api
+  namespace: {{ .Values.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: serving-api
+  minReplicas: {{ .Values.serving.hpa.minReplicas }}
+  maxReplicas: {{ .Values.serving.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.serving.hpa.targetCPUUtilization }}

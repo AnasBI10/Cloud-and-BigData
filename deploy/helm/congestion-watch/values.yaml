@@ -78,8 +78,11 @@ serving:
   # feststeht (z. B. "http://congestion-watch.example"). Siehe Kommentar in
   # templates/serving.yaml.
   corsOrigins: "*"
-  replicas: 2
   port: 8000
+  hpa:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilization: 70
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 500m, memory: 512Mi }
@@ -89,8 +92,11 @@ serving:
 
 ui:
   image: congestion-watch/ui:0.1.2
-  replicas: 2
   port: 8080
+  hpa:
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilization: 70
   # Leer = gleiche Herkunft. Nur setzen, wenn die API unter einer anderen
   # Adresse laeuft als die UI (etwa bei getrennten Hosts).
   apiBaseUrl: ""
