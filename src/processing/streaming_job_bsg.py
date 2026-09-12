@@ -151,14 +151,27 @@ def build_spark() -> SparkSession:
     )
 
 
-def append_delta(df: DataFrame, path: str) -> None:
-    (
+def append_delta(
+    df: DataFrame, path: str, txn_app_id: str | None = None, batch_id: int | None = None
+) -> None:
+    """SCRUM-95: txnAppId + txnVersion machen den Append idempotent. Delta
+    speichert je txnAppId die zuletzt committete txnVersion im Log; ein
+    erneuter Schreibversuch mit derselben (txnAppId, txnVersion)-Kombination
+    (z.B. nach einem Crash-Neustart, der denselben Kafka-Batch nochmal
+    liefert) wird dadurch als No-Op erkannt statt Duplikate anzuhaengen.
+    txn_app_id ist bewusst pro Zieltabelle unterschiedlich (nicht nur pro
+    Query), da Bronze und Silver aus demselben Batch stammen, aber getrennte
+    Commit-Historien im Delta-Log fuehren.
+    """
+    writer = (
         df.write
         .format("delta")
         .mode("append")
         .option("mergeSchema", "true")
-        .save(path)
     )
+    if txn_app_id is not None and batch_id is not None:
+        writer = writer.option("txnAppId", txn_app_id).option("txnVersion", batch_id)
+    writer.save(path)
 
 
 def upsert_gold(batch_df: DataFrame, path: str) -> None:
@@ -294,10 +307,10 @@ def build_process_batch(baseline: DataFrame):
         batch_df.persist()
 
         bronze = batch_df.drop("is_late_marker")
-        append_delta(bronze, BRONZE_TABLE_PATH)
+        append_delta(bronze, BRONZE_TABLE_PATH, txn_app_id="bronze-sink", batch_id=batch_id)
 
         silver = bronze.where(col("status") == 0)
-        append_delta(silver, SILVER_TABLE_PATH)
+        append_delta(silver, SILVER_TABLE_PATH, txn_app_id="silver-sink", batch_id=batch_id)
 
         gold_input = batch_df.where(col("status") == 0).where(~col("is_late_marker"))
         gold_agg = (
