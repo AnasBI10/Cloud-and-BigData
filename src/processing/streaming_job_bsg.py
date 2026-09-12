@@ -31,10 +31,9 @@ GOLD_TABLE_PATH = os.environ.get("GOLD_TABLE_PATH", "s3a://gold/congestion_score
 WINDOW_DURATION = "5 minutes"
 WINDOW_SLIDE = "1 minute"
 WATERMARK_DELAY = "2 minutes"
-# Grosszuegiger als WATERMARK_DELAY: Open-Meteo loest nur stuendlich auf und
-# der Poller fragt alle 5 Minuten ab - verspaetete oder ausbleibende
-# Wetter-Batches duerfen den Traffic-Stream nicht blockieren (SCRUM-84).
-WEATHER_WATERMARK_DELAY = "65 minutes"
+# War 65 Minuten, hat bei Left-Outer-Join-Semantik den Heap gesprengt (OOM,
+# 12.09.). Traffic-Zeilen hängen bis zum Ablauf im Join-State. 20 Minuten reichen bei einem 5-Minuten-Poll-Intervall komfortabel
+WEATHER_WATERMARK_DELAY = "20 minutes"
 CONFLUENT_WIRE_HEADER_BYTES = 5
 
 
@@ -121,6 +120,10 @@ def build_spark() -> SparkSession:
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config(
+            "spark.sql.streaming.stateStore.providerClass",
+            "org.apache.spark.sql.execution.streaming.state.RocksDBStateStoreProvider",
+        )
         .getOrCreate()
     )
 

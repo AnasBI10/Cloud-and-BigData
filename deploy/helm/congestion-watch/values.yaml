@@ -101,7 +101,7 @@ ui:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.7.3
+  image: congestion-watch/processing:0.8.2
   checkpointStorage: 1Gi
   resources:
     requests: { cpu: 500m, memory: 1Gi }
