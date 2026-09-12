@@ -486,6 +486,97 @@ gleiche Herkunft — der Browser braucht dafür kein CORS.
 
 ## 9. Deployment-Anleitung
 
+### Voraussetzungen
+
+| Anforderung | Grund |
+|---|---|
+| Kubernetes-Cluster mit mindestens 3 Nodes | Kafka laeuft mit Replikationsfaktor 3 und drei Broker-Repliken; auf weniger Nodes verliert man echte Ausfalldomaenen. Getestet auf k3s v1.36.4, 1 Control-Plane + 2 Worker. |
+| Default-StorageClass vorhanden | Alle PVCs (Kafka, MinIO, Processing-Checkpoints) verzichten bewusst auf eine explizite storageClassName und nutzen die Cluster-Default (local-path bei k3s). Fehlt eine Default-Klasse, bleiben PVCs auf Pending. |
+| helm (v3) und kubectl, konfiguriert gegen den Ziel-Cluster | Das gesamte Deployment laeuft ueber ein einziges Helm-Chart (deploy/helm/congestion-watch). |
+| docker auf jedem Node, auf dem eigene Images laufen sollen | Das Projekt nutzt keine eigene Container-Registry. Eigene Images (ingestion, processing, serving, ui) werden lokal gebaut und muessen manuell auf jeden Node verteilt werden (siehe Schritt 3). |
+
+Pruefen:
+
+    kubectl get nodes
+    kubectl get storageclass
+
+### Schritt 1: Namespace-Konfiguration
+
+Der Namespace ist zentral in deploy/helm/congestion-watch/values.yaml (Zeile 1, namespace: bigdata) hinterlegt, nicht ueber helm install -n. Fuer einen abweichenden Namespace genuegt --set namespace=NAME beim Install.
+
+### Schritt 2: Secrets/Zugangsdaten setzen
+
+Zwei Platzhalter in values.yaml muessen vor dem Deploy ersetzt werden: minio.password (MinIO Root-Passwort) und socrata.appToken (NYC-DOT-API-Token, kostenlos unter data.cityofnewyork.us). Ohne gueltiges Socrata-Token laeuft der live-Poller anonym mit strengerem Rate-Limit weiter.
+
+### Schritt 3: Eigene Docker-Images bauen und auf alle Nodes verteilen
+
+Vier Images werden aus dem Repo-Root gebaut (Build-Kontext bewusst das Repo-Root, da mehrere Dockerfiles auf schemas/ und data/ zugreifen):
+
+    cd bigdata-repo
+    docker build -t congestion-watch/ingestion:0.1.0  -f src/ingestion/Dockerfile .
+    docker build -t congestion-watch/processing:0.1.0 -f src/processing/Dockerfile .
+    docker build -t congestion-watch/serving:0.1.0    -f src/serving/Dockerfile .
+    docker build -t congestion-watch/ui:0.1.0          -f src/ui/Dockerfile .
+
+Auf dem Build-Node ins Cluster-Runtime importieren (k3s nutzt containerd, nicht den Docker-Daemon):
+
+    for img in ingestion processing serving ui; do
+      docker save congestion-watch/${img}:0.1.0 -o /tmp/${img}.tar
+      sudo k3s ctr images import /tmp/${img}.tar
+    done
+
+Auf jeden weiteren Node kopieren und dort importieren (kein Node darf ausgelassen werden, sonst ImagePullBackOff sobald der Scheduler dort landet):
+
+    for node in WORKER_IP_1 WORKER_IP_2; do
+      scp /tmp/*.tar ubuntu@${node}:/tmp/
+      ssh ubuntu@${node} 'for f in /tmp/*.tar; do sudo k3s ctr images import "$f"; done'
+    done
+
+Die drei externen Images (quay.io/minio/minio, apache/kafka:3.9.0, confluentinc/cp-schema-registry:7.6.1) werden automatisch von den jeweiligen oeffentlichen Registries gezogen.
+
+### Schritt 4: Image-Tags in values.yaml referenzieren
+
+    producer.image: congestion-watch/ingestion:0.1.0
+    processing.image: congestion-watch/processing:0.1.0
+    serving.image: congestion-watch/serving:0.1.0
+    ui.image: congestion-watch/ui:0.1.0
+
+Bei jeder Codeaenderung neuen Tag vergeben (nicht latest wiederverwenden), sonst zieht imagePullPolicy: IfNotPresent den alten Stand nicht neu.
+
+### Schritt 5: Deployen
+
+    helm install congestion-watch deploy/helm/congestion-watch -n bigdata --create-namespace
+
+Fuer einen abweichenden Namespace zusaetzlich --set namespace=NAME anhaengen. Das Chart legt beim Install/Upgrade automatisch zwei Hook-Jobs an: minio-create-buckets (Bucket-Anlage) und schema-register (Avro-Schema-Registrierung).
+
+### Schritt 6: Verifikation
+
+    kubectl get pods -n bigdata -o wide
+
+Erwartet: alle Pods Running, kafka-0/1/2 ueber verschiedene Nodes verteilt. Erststart kann mehrere Minuten dauern (Kafka-Image ca. 400 MB, Schema-Registry-Image ca. 1,4 GB).
+
+    kubectl logs -n bigdata job/schema-register
+
+Erwartet: eine registrierte Schema-ID je Subject, keine Fehlermeldung.
+
+    kubectl get pods -n bigdata -l app=producer-synthetic
+    kubectl logs -n bigdata deploy/producer-synthetic --tail=20
+
+Erwartet: "zugestellt=N fehlgeschlagen=0" in regelmaessigen Abstaenden.
+
+    kubectl port-forward -n bigdata svc/serving-api 8000:80
+    curl localhost:8000/health
+
+Erwartet: Status "ready".
+
+### Bekannte Fallstricke
+
+- Kafka podManagementPolicy: Parallel ist zwingend. Bei OrderedReady wartet Kubernetes auf die Readiness von kafka-0, die dieser mangels KRaft-Quorum ohne die anderen beiden Broker nie erreicht (Deadlock).
+- Schema-Registry enableServiceLinks: false ist zwingend. Kubernetes injiziert sonst pro Service Umgebungsvariablen, die das cp-Image faelschlich als eigene Konfiguration interpretiert und mit Exit 1 abbricht.
+- Live-Poller laeuft als StatefulSet, nicht als Deployment. Der Shard-Index wird aus dem Pod-Ordinal abgeleitet; ein Deployment wuerde allen Repliken denselben Shard zuweisen.
+- Keine Registry vorhanden: Bei jedem neuen Image-Tag muss Schritt 3 auf allen Nodes wiederholt werden, sonst ImagePullBackOff sobald der Pod auf einem anderen Node landet.
+- Hook-Jobs mit statischem Namen (schema-register, minio-create-buckets) muessen bei einem erneuten helm upgrade ggf. manuell geloescht werden: kubectl delete job schema-register minio-create-buckets -n bigdata.
+
 ## 10. Wesentliche Codeabschnitte
 
 Alle Pfade sind relativ zum Repo-Root. Zeilenangaben beziehen sich auf den
