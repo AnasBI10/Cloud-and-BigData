@@ -37,6 +37,20 @@ WATERMARK_DELAY = "2 minutes"
 WEATHER_WATERMARK_DELAY = "65 minutes"
 CONFLUENT_WIRE_HEADER_BYTES = 5
 
+# SCRUM-83: Stateful Processing - Anomalie-Erkennung ueber mehrere Fenster.
+# Ein einzelner auffaelliger Score kann Rauschen sein; erst wenn ein Segment
+# ueber mehrere aufeinanderfolgende Batches hinweg konstant ueber der Schwelle
+# liegt, gilt die Anomalie als bestaetigt. Der Zustand (wie viele Fenster in
+# Folge schon auffaellig) wird in einer eigenen Delta-Tabelle gefuehrt und bei
+# jedem Batch per MERGE aktualisiert - bewusst kein Spark-natives
+# flatMapGroupsWithState, um keine zweite Streaming-Quelle/Checkpoint-Aenderung
+# an der bereits stabil laufenden Pipeline vorzunehmen.
+ANOMALY_SCORE_THRESHOLD = float(os.environ.get("ANOMALY_SCORE_THRESHOLD", "2.0"))
+ANOMALY_CONFIRM_WINDOWS = int(os.environ.get("ANOMALY_CONFIRM_WINDOWS", "3"))
+ANOMALY_STATE_TABLE_PATH = os.environ.get(
+    "ANOMALY_STATE_TABLE_PATH", "s3a://gold/anomaly_state"
+)
+
 
 def read_avro_schema(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
@@ -168,6 +182,90 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
     )
 
 
+def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
+    """Fuehrt je link_id einen laufenden Zaehler, wie viele Fenster in Folge
+    der Congestion-Score ueber ANOMALY_SCORE_THRESHOLD lag. is_confirmed wird
+    erst true, wenn der Zaehler ANOMALY_CONFIRM_WINDOWS erreicht - dadurch
+    werden Einzelausschlaege (Rauschen) nicht sofort als Anomalie gemeldet.
+    Bei Score unter der Schwelle wird der Zaehler zurueckgesetzt.
+    """
+    spark = joined.sparkSession
+
+    # Innerhalb eines Batches koennen mehrere ueberlappende Fenster je
+    # link_id auftauchen (5-Min-Fenster, 1-Min-Slide) - nur das neueste
+    # Fenster je Segment ist fuer den State-Uebergang relevant.
+    latest = (
+        joined
+        .where(col("has_baseline") & col("congestion_score").isNotNull())
+        .withColumn(
+            "rn",
+            expr(
+                "row_number() over ("
+                "partition by link_id order by window_start desc"
+                ")"
+            ),
+        )
+        .where(col("rn") == 1)
+        .drop("rn")
+        .select(
+            col("link_id"),
+            col("borough"),
+            col("window_start").alias("last_window_start"),
+            col("congestion_score").alias("last_score"),
+            (col("congestion_score") >= lit(ANOMALY_SCORE_THRESHOLD)).alias(
+                "is_anomalous_now"
+            ),
+        )
+    )
+
+    if latest.rdd.isEmpty():
+        return
+
+    if not DeltaTable.isDeltaTable(spark, path):
+        (
+            latest
+            .withColumn("consecutive_count", when(col("is_anomalous_now"), lit(1)).otherwise(lit(0)))
+            .withColumn("is_confirmed", lit(False))
+            .withColumn("first_window_start", col("last_window_start"))
+            .withColumn("updated_at", current_timestamp())
+            .drop("is_anomalous_now")
+            .write.format("delta").mode("overwrite").save(path)
+        )
+        return
+
+    target = DeltaTable.forPath(spark, path)
+    (
+        target.alias("t")
+        .merge(latest.alias("s"), "t.link_id = s.link_id")
+        .whenMatchedUpdate(set={
+            "consecutive_count": (
+                "CASE WHEN s.is_anomalous_now THEN t.consecutive_count + 1 "
+                "ELSE 0 END"
+            ),
+            "is_confirmed": (
+                f"CASE WHEN s.is_anomalous_now AND (t.consecutive_count + 1) >= {ANOMALY_CONFIRM_WINDOWS} "
+                "THEN true WHEN NOT s.is_anomalous_now THEN false "
+                "ELSE t.is_confirmed END"
+            ),
+            "borough": "s.borough",
+            "last_window_start": "s.last_window_start",
+            "last_score": "s.last_score",
+            "updated_at": "current_timestamp()",
+        })
+        .whenNotMatchedInsert(values={
+            "link_id": "s.link_id",
+            "borough": "s.borough",
+            "consecutive_count": "CASE WHEN s.is_anomalous_now THEN 1 ELSE 0 END",
+            "is_confirmed": "false",
+            "first_window_start": "s.last_window_start",
+            "last_window_start": "s.last_window_start",
+            "last_score": "s.last_score",
+            "updated_at": "current_timestamp()",
+        })
+        .execute()
+    )
+
+
 def build_process_batch(baseline: DataFrame):
     """erzeugt process_batch als funktion mit enthaltenem zustand, damit die einmal geladene baseline in jedem batch verfügbar ist"""
 
@@ -230,6 +328,7 @@ def build_process_batch(baseline: DataFrame):
             .withColumn("updated_at", current_timestamp())
         )
         upsert_gold(joined, GOLD_TABLE_PATH)
+        upsert_anomaly_state(joined, ANOMALY_STATE_TABLE_PATH)
 
         batch_df.unpersist()
 

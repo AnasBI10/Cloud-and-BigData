@@ -16,7 +16,9 @@ RUN mkdir -p /opt/spark-app/checkpoints /opt/spark-app/ivy-cache && \
 USER 185
 
 ENTRYPOINT ["/opt/spark/bin/spark-submit", \
-            "--master", "local[*]", \
+            "--master", "local[2]", \
             "--conf", "spark.jars.ivy=/opt/spark-app/ivy-cache", \
+            "--conf", "spark.driver.memory=3g", \
+            "--conf", "spark.sql.shuffle.partitions=4", \
             "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.8,org.apache.spark:spark-avro_2.12:3.5.8,io.delta:delta-spark_2.12:3.2.0,org.apache.hadoop:hadoop-aws:3.3.4", \
             "/opt/spark-app/streaming_job_bsg.py"]

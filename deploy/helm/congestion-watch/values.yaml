@@ -101,11 +101,11 @@ ui:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.7.3
+  image: congestion-watch/processing:0.8.2
   checkpointStorage: 1Gi
   resources:
-    requests: { cpu: 500m, memory: 1Gi }
-    limits:   { cpu: 1, memory: 2Gi }
+    requests: { cpu: 500m, memory: 2Gi }
+    limits:   { cpu: 1, memory: 4Gi }
   # Batch-Lauf fuer das Baseline-Profil, das die Serving-API zum Score braucht.
   # Alle sechs Stunden: die Historie waechst langsam, oefter zu rechnen aendert
   # die Zellen kaum, kostet aber eine CPU aus dem ResourceQuota.
