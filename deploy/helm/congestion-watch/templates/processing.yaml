@@ -1,4 +1,28 @@
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: processing-config
+  namespace: {{ .Values.namespace }}
+data:
+  KAFKA_BOOTSTRAP: "kafka:9092"
+  KAFKA_TOPIC_IN: "traffic.speeds.raw"
+  KAFKA_TOPIC_DLQ: "traffic.speeds.dlq"
+  KAFKA_TOPIC_WEATHER: "weather.observations.raw"
+  SCHEMA_PATH: "/opt/spark-app/schemas/traffic_speed_event.avsc"
+  WEATHER_SCHEMA_PATH: "/opt/spark-app/schemas/weather_observation_event.avsc"
+  CHECKPOINT_DIR: "/checkpoints"
+  MINIO_ENDPOINT: "http://minio:9000"
+  BRONZE_TABLE_PATH: "s3a://bronze/traffic_speeds_raw"
+  SILVER_TABLE_PATH: "s3a://bronze/traffic_speeds_valid"
+  GOLD_TABLE_PATH: "s3a://gold/congestion_scores"
+  ANOMALY_STATE_TABLE_PATH: "s3a://gold/anomaly_state"
+  STARTING_OFFSETS: {{ .Values.processing.streaming.startingOffsets | quote }}
+  MAX_OFFSETS_PER_TRIGGER: {{ .Values.processing.streaming.maxOffsetsPerTrigger | quote }}
+  WEATHER_MAX_OFFSETS_PER_TRIGGER: {{ .Values.processing.streaming.weatherMaxOffsetsPerTrigger | quote }}
+  ANOMALY_SCORE_THRESHOLD: {{ .Values.processing.streaming.anomalyScoreThreshold | quote }}
+  ANOMALY_CONFIRM_WINDOWS: {{ .Values.processing.streaming.anomalyConfirmWindows | quote }}
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: processing-checkpoints
@@ -26,34 +50,15 @@ spec:
     metadata:
       labels:
         app: processing-streaming
+      annotations:
+        checksum/config: {{ .Values.processing.streaming | toYaml | sha256sum }}
     spec:
       containers:
         - name: processing
           image: {{ .Values.processing.image }}
-          env:
-            - name: KAFKA_BOOTSTRAP
-              value: "kafka:9092"
-            - name: KAFKA_TOPIC_IN
-              value: "traffic.speeds.raw"
-            - name: KAFKA_TOPIC_DLQ
-              value: "traffic.speeds.dlq"
-            - name: SCHEMA_PATH
-              value: "/opt/spark-app/schemas/traffic_speed_event.avsc"
-            - name: KAFKA_TOPIC_WEATHER
-              value: "weather.observations.raw"
-            - name: WEATHER_SCHEMA_PATH
-              value: "/opt/spark-app/schemas/weather_observation_event.avsc"
-            - name: CHECKPOINT_DIR
-              value: "/checkpoints"
-            - name: MINIO_ENDPOINT
-              value: "http://minio:9000"
-            - name: BRONZE_TABLE_PATH
-              value: "s3a://bronze/traffic_speeds_raw"
-            - name: SILVER_TABLE_PATH
-              value: "s3a://bronze/traffic_speeds_valid"
-            - name: GOLD_TABLE_PATH
-              value: "s3a://gold/congestion_scores"
           envFrom:
+            - configMapRef:
+                name: processing-config
             - secretRef:
                 name: minio-credentials
           volumeMounts:

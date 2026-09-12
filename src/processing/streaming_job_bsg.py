@@ -36,6 +36,14 @@ WATERMARK_DELAY = "2 minutes"
 WEATHER_WATERMARK_DELAY = "20 minutes"
 CONFLUENT_WIRE_HEADER_BYTES = 5
 
+# Ohne Obergrenze plant Spark den ersten Micro-Batch ueber den gesamten
+# Topic-Rueckstand (gemessen: 11,8 Mio. Events).
+MAX_OFFSETS_PER_TRIGGER = os.environ.get("MAX_OFFSETS_PER_TRIGGER", "20000")
+WEATHER_MAX_OFFSETS_PER_TRIGGER = os.environ.get("WEATHER_MAX_OFFSETS_PER_TRIGGER", "2000")
+# latest im Normalbetrieb. Fuer den Kappa-Reprocessing-Lauf auf earliest
+# setzen und den Checkpoint loeschen - derselbe Job, derselbe Filter.
+STARTING_OFFSETS = os.environ.get("STARTING_OFFSETS", "latest")
+
 # SCRUM-83: Stateful Processing - Anomalie-Erkennung ueber mehrere Fenster.
 # Ein einzelner auffaelliger Score kann Rauschen sein; erst wenn ein Segment
 # ueber mehrere aufeinanderfolgende Batches hinweg konstant ueber der Schwelle
@@ -90,7 +98,8 @@ def read_weather_stream(spark: SparkSession, weather_schema_json: str) -> DataFr
         .format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC_WEATHER)
-        .option("startingOffsets", "earliest")
+        .option("startingOffsets", STARTING_OFFSETS)
+        .option("maxOffsetsPerTrigger", WEATHER_MAX_OFFSETS_PER_TRIGGER)
         .option("failOnDataLoss", "false")
         .load()
     )
@@ -124,7 +133,7 @@ def build_spark() -> SparkSession:
     return (
         SparkSession.builder
         .appName("congestion-watch-bronze-silver-gold")
-        .config("spark.sql.shuffle.partitions", "12")
+        .config("spark.sql.shuffle.partitions", "4")
         .config("spark.jars.ivy", "/opt/spark-app/ivy-cache")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
@@ -177,7 +186,10 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
         target.alias("target")
         .merge(
             batch_df.alias("source"),
-            "target.link_id = source.link_id AND target.window_start = source.window_start",
+            # window_date gehoert in die Bedingung
+            "target.window_date = source.window_date AND "
+            "target.link_id = source.link_id AND "
+            "target.window_start = source.window_start",
         )
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
@@ -229,7 +241,7 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
             latest
             .withColumn("consecutive_count", when(col("is_anomalous_now"), lit(1)).otherwise(lit(0)))
             .withColumn("is_confirmed", lit(False))
-            .withColumn("first_window_start", col("last_window_start"))
+            .withColumn("first_window_start", when(col("is_anomalous_now"), col("last_window_start")))
             .withColumn("updated_at", current_timestamp())
             .drop("is_anomalous_now")
             .write.format("delta").mode("overwrite").save(path)
@@ -250,6 +262,12 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
                 "THEN true WHEN NOT s.is_anomalous_now THEN false "
                 "ELSE t.is_confirmed END"
             ),
+            
+            "first_window_start": (
+                "CASE WHEN s.is_anomalous_now AND t.consecutive_count = 0 THEN s.last_window_start "
+                "WHEN s.is_anomalous_now THEN t.first_window_start "
+                "ELSE NULL END"
+            ),
             "borough": "s.borough",
             "last_window_start": "s.last_window_start",
             "last_score": "s.last_score",
@@ -260,7 +278,7 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
             "borough": "s.borough",
             "consecutive_count": "CASE WHEN s.is_anomalous_now THEN 1 ELSE 0 END",
             "is_confirmed": "false",
-            "first_window_start": "s.last_window_start",
+            "first_window_start": "CASE WHEN s.is_anomalous_now THEN s.last_window_start END",
             "last_window_start": "s.last_window_start",
             "last_score": "s.last_score",
             "updated_at": "current_timestamp()",
@@ -330,8 +348,11 @@ def build_process_batch(baseline: DataFrame):
             .withColumn("is_late_arrival", lit(False))
             .withColumn("updated_at", current_timestamp())
         )
+        
+        joined.persist()
         upsert_gold(joined, GOLD_TABLE_PATH)
         upsert_anomaly_state(joined, ANOMALY_STATE_TABLE_PATH)
+        joined.unpersist()
 
         batch_df.unpersist()
 
@@ -349,7 +370,8 @@ def main() -> None:
         .format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC_IN)
-        .option("startingOffsets", "earliest")
+        .option("startingOffsets", STARTING_OFFSETS)
+        .option("maxOffsetsPerTrigger", MAX_OFFSETS_PER_TRIGGER)
         .option("failOnDataLoss", "false")
         .load()
     )

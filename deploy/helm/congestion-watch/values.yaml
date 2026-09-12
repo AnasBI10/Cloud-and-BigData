@@ -101,8 +101,14 @@ ui:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.8.2
+  image: congestion-watch/processing:0.9.0
   checkpointStorage: 1Gi
+  streaming:
+    startingOffsets: latest
+    maxOffsetsPerTrigger: 20000
+    weatherMaxOffsetsPerTrigger: 2000
+    anomalyScoreThreshold: "2.0"
+    anomalyConfirmWindows: 3
   resources:
     requests: { cpu: 500m, memory: 2Gi }
     limits:   { cpu: 1, memory: 4Gi }
