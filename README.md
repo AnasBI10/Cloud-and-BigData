@@ -644,3 +644,33 @@ neu abgleichen.
 ## 11. Screenshots und Nachweise
 
 ## 12. Grenzen des Prototyps und Ausblick
+
+### Was bewusst nicht umgesetzt wurde
+
+- Kafka-DLQ-Sink ist at-least-once, nicht exactly-once. Anders als die Delta-Sinks (Bronze/Silver via txnAppId/txnVersion, Gold und Anomaly-State via MERGE) hat Spark Structured Streaming keine native transaktionale Producer-API fuer Kafka-Sinks. Bei einer Batch-Wiederholung nach einem Absturz koennen doppelte Eintraege in traffic.speeds.dlq entstehen. Bewusst akzeptiert, da die DLQ ein Diagnosepfad ist und keine Downstream-Aggregation auf ihr aufsetzt.
+
+- Keine eigene Container-Registry. Eigene Images werden manuell per docker save/scp/k3s ctr images import auf jeden Node verteilt (siehe Kapitel 9). Das ist fuer drei Nodes noch handhabbar, skaliert aber nicht und ist eine haeufige Fehlerquelle (ImagePullBackOff, wenn ein Node beim Verteilen vergessen wird). Eine private Registry haette das strukturell geloest, war aber aus Zeitgruenden nicht mehr Teil des Prototyps.
+
+- is_late_arrival ist ein Platzhalter. Der Streaming-Job schliesst als "late" markierte Events komplett von der Gold-Aggregation aus (Ablage nur in der DLQ) statt sie nachtraeglich in ein bereits geschriebenes Fenster einzurechnen. Dadurch kann das Feld in der Gold-Tabelle nie true werden. Eine vollstaendige Late-Data-Korrektur haette einen Re-Aggregations-Mechanismus mit laengerem Watermark oder Update-Mode statt Append-Mode erfordert.
+
+- Wetter-Aufloesung ist grob. Open-Meteo liefert Wetterdaten je Borough-Zentroid (5 feste Koordinatenpaare), nicht je Segment. Bei einem Stadtgebiet wie Manhattan kann die tatsaechliche lokale Wetterlage an einem Segment mehrere Kilometer vom Abfragepunkt abweichen. Fuer den Prototyp ausreichend, fuer eine produktive Nutzung waere ein feineres Gitter oder ein Wetterdienst mit segment-genauen Daten noetig.
+
+- Anomalie-Bestaetigung ist einfach gehalten. Der Zustandsautomat in upsert_anomaly_state zaehlt aufeinanderfolgende auffaellige Fenster pro Segment und bestaetigt eine Anomalie ab einer festen Schwelle (Default 3 Fenster). Komplexere Muster (z. B. Erholung nach Anomalie, Unterscheidung zwischen kurzfristigem Ausreisser und dauerhafter Verschlechterung) werden nicht abgebildet.
+
+### Bekannte betriebliche Einschraenkungen
+
+- CI/CD deckt Build, Lint und Image-Push ab, ersetzt aber keine automatisierten Tests. Es existieren keine Unit- oder Integrationstests fuer die Streaming-Logik; Verifikation erfolgte manuell durch Log-Beobachtung und Stichproben in Kafka/Delta.
+
+- Ressourcenlimits wurden iterativ per Trial-and-Error auf die konkrete 3-Node-Umgebung (je 4 vCPU) eingestellt, nicht systematisch dimensioniert. Der Processing-Pod lief unter der urspruenglichen Grenze von 2Gi bei aktivierter Anomalie-Erkennung in einen OutOfMemoryError; nach Erhoehung auf 4Gi und Reduktion der Spark-Parallelitaet (local[2] statt local[*]) stabil. Auf anderer Hardware waeren die Werte erneut zu pruefen.
+
+- Der erste Batch nach einem Neustart mit taeglich wachsendem historischem Datenbestand (Bronze/Silver/Gold) braucht spuerbar laenger als Folge-Batches (Startoffset earliest liest den kompletten bisherigen Kafka-Verlauf). Fuer den Prototyp unkritisch, in einer produktiven Umgebung wuerde man Kafka-Retention und Startoffset-Strategie bewusst gegeneinander abwaegen.
+
+### Ausblick
+
+Naheliegende naechste Schritte, absteigend nach vermutetem Aufwand-Nutzen-Verhaeltnis:
+
+1. Serving-API um einen Endpunkt fuer den Anomalie-Zustand (gold/anomaly_state) ergaenzen, damit bestaetigte Anomalien auch ueber die UI sichtbar werden, nicht nur in der Delta-Tabelle.
+2. Private Container-Registry im Cluster (z. B. registry:2 als eigenes Deployment) einrichten, um die manuelle Multi-Node-Image-Verteilung abzuloesen.
+3. Unit-Tests fuer die reinen Transformationsfunktionen (z. B. derive_condition, _stable_fraction, upsert_anomaly_state-Zustandsuebergaenge) ergaenzen und in die bestehende CI-Pipeline einhaengen.
+4. Late-Data-Korrektur ueber Update-Mode statt der aktuellen Ausschluss-Logik, damit is_late_arrival tatsaechlich befuellt werden kann.
+5. Leaflet/OpenStreetMap statt der selbstgebauten SVG-Projektion fuer die Kartenansicht, fuer einen geografisch korrekten Kartenhintergrund.
