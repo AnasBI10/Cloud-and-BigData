@@ -8,7 +8,9 @@ resourceQuota:
 storageClass: local-path
 
 minio:
-  image: minio/minio:latest
+  
+  image: quay.io/minio/minio:latest
+  mcImage: quay.io/minio/mc:latest
   storage: 5Gi
   user: admin
   password: "CHANGE_ME"

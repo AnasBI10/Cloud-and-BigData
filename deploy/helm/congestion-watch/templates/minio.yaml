@@ -81,7 +81,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:latest
+          image: {{ .Values.minio.mcImage }}
           command: ["/bin/sh", "-c"]
           args:
             - |
