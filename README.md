@@ -488,6 +488,68 @@ gleiche Herkunft — der Browser braucht dafür kein CORS.
 
 ## 10. Wesentliche Codeabschnitte
 
+Alle Pfade sind relativ zum Repo-Root. Zeilenangaben beziehen sich auf den
+Abgabestand; bei Aenderungen bitte mit `grep -n "^def \|^class " <datei>`
+neu abgleichen.
+
+### Ingestion
+
+| Datei / Zeilen | Was passiert dort |
+|---|---|
+| src/ingestion/common.py#L38-L99 | `Settings`-Dataclass (Konfiguration aus ENV/ConfigMap) sowie `load_seed()`/`shard_of()` zum Laden und Sharding der Segment-Stammdaten je Producer-Replik. |
+| src/ingestion/common.py#L137-L251 | `build_event()` baut das Event-Dict inkl. `event_key` (Merge-Key fuer Exactly-once), `EventPublisher`-Klasse kapselt Avro-Serialisierung + Kafka-Producer mit `acks=all`/`enable.idempotence=True`. |
+| src/ingestion/synthetic.py#L83 | `run()`: Lastgenerator-Modus, erzeugt synthetische Verkehrsereignisse mit konfigurierbarer Rate (`EVENTS_PER_SECOND`). |
+| src/ingestion/live_poller.py#L68-L127 | `_fetch()`/`run()`: pollt den echten NYC-DOT-Feed (Socrata-API), gesharded ueber mehrere StatefulSet-Replikas. |
+| src/ingestion/weather.py#L69-L163 | `fetch_borough()`/`run()`: Open-Meteo-Poller je Borough, publiziert Wetterereignisse mit `borough` als Kafka-Key (SCRUM-84). |
+| src/ingestion/main.py#L23 | Einstiegspunkt, verzweigt nach `MODE` (synthetic/live/weather) in den jeweiligen Producer. |
+
+### Stream Processing
+
+| Datei / Zeilen | Was passiert dort |
+|---|---|
+| src/processing/streaming_job_bsg.py#L78-L123 | `enrich_with_seed()` (Broadcast-Join gegen Segment-Stammdaten) und `read_weather_stream()` (Wetter-Stream lesen + Spaltenumbenennung zur Kollisionsvermeidung). |
+| src/processing/streaming_job_bsg.py#L154-L176 | `append_delta()`: idempotenter Bronze/Silver-Append via `txnAppId`/`txnVersion` (Exactly-once, SCRUM-95). |
+| src/processing/streaming_job_bsg.py#L177-L212 | `upsert_gold()`: MERGE der aggregierten Congestion-Scores in die Gold-Tabelle (Windowing, Baseline-Join, Score-Berechnung). |
+| src/processing/streaming_job_bsg.py#L213-L302 | `upsert_anomaly_state()`: Stateful Processing -- fuehrt je Segment einen Zaehler aufeinanderfolgender auffaelliger Fenster, bestaetigt Anomalien erst ab einer Mindestanzahl (SCRUM-83). |
+| src/processing/streaming_job_bsg.py#L375 | `main()`: verdrahtet die drei Streams (Traffic, Weather, DLQ), Watermarks, Stream-Stream-Join und die drei parallelen `writeStream`-Queries. |
+| src/processing/compute_baseline.py#L37 | Batch-Job zur Baseline-Berechnung (Erwartungswert/Stddev je Segment x Wochentag x Stunde), Grundlage fuer den Congestion-Score. |
+
+### Serving (API)
+
+| Datei / Zeilen | Was passiert dort |
+|---|---|
+| src/serving/readers.py#L279-L422 | `DeltaReader`: liest die Gold-Tabelle direkt ueber `deltalake`/PyArrow (ohne Spark/JVM), Spaltenvertrag ueber `SINK_COLUMNS`. |
+| src/serving/readers.py#L200-L268 | `BaselineIndex`: gecachter Zugriff auf die Baseline-Tabelle fuer Referenzgeschwindigkeiten. |
+| src/serving/main.py#L96-L124 | `/health`, `/ready`: Liveness/Readiness-Endpunkte, inkl. Pruefung der Gold-Tabellen-Erreichbarkeit. |
+| src/serving/main.py#L125-L161 | `/api/anomalies`: liefert Segmente mit Congestion-Score ueber Schwellenwert, sortiert nach Score. |
+| src/serving/main.py#L187-L212 | `/api/segments`: aktueller Zustand aller Segmente fuer die Kartenansicht. |
+| src/serving/main.py#L213-L296 | `/api/events` (POST): Einspeisung einzelner Events von der UI aus (Datenlieferant-Rolle). |
+| src/serving/main.py#L297-L347 | Szenario-Endpunkt: startet vordefinierte Event-Batches (z. B. simulierter Vorfall) zur Demonstration. |
+
+### User-facing UI
+
+| Datei / Zeilen | Was passiert dort |
+|---|---|
+| src/ui/js/dashboard.js#L96-L162 | `buildMap()`/`addBoroughLabels()`: rendert die Segmentkarte (SVG) mit Congestion-Einfaerbung. |
+| src/ui/js/dashboard.js#L184-L283 | Tooltip-Handling und Live-Update-Zyklus (Polling der Serving-API). |
+| src/ui/js/dashboard.js#L289-L398 | `renderChart()`: Zeitreihen-Diagramm je ausgewaehltem Segment. |
+| src/ui/js/ingest.js#L69-L125 | `wireEventForm()`: UI-Formular zum manuellen Einspeisen von Events (Datenlieferant-Rolle) gegen `/api/events`. |
+| src/ui/js/ingest.js#L139-L210 | `wireScenarioForm()`/`followRun()`: Start und Live-Verfolgung eines Szenario-Laufs. |
+| src/ui/js/api.js | Zentrale Fetch-Wrapper fuer alle Serving-API-Aufrufe der UI. |
+
+### Kubernetes-Manifeste (Helm-Chart)
+
+| Datei | Was passiert dort |
+|---|---|
+| deploy/helm/congestion-watch/templates/ingestion.yaml | `Deployment`s fuer synthetic/weather-Producer, `StatefulSet` fuer den live-Poller (Sharding braucht stabile Identitaet), zugehoerige `ConfigMap`/`HPA`. |
+| deploy/helm/congestion-watch/templates/kafka.yaml | Kafka-`StatefulSet` (3 Broker, KRaft-Mode), Topic-Init-Job und Schema-Registrierungs-Job (Post-Install/Upgrade-Hook). |
+| deploy/helm/congestion-watch/templates/processing.yaml | `Deployment` fuer den Spark-Streaming-Job, `PersistentVolumeClaim` fuer Checkpoints, Env-Konfiguration (Topics, Schema-Pfade, MinIO-Zugang). |
+| deploy/helm/congestion-watch/templates/baseline.yaml | `CronJob` fuer die periodische Baseline-Neuberechnung. |
+| deploy/helm/congestion-watch/templates/minio.yaml | MinIO-`StatefulSet` (S3-kompatibler Objektspeicher fuer Bronze/Silver/Gold), Bucket-Init-Job. |
+| deploy/helm/congestion-watch/templates/serving.yaml | `Deployment` + `Service` + `Ingress` der Serving-API, horizontale Skalierung ueber mehrere Replikas. |
+| deploy/helm/congestion-watch/templates/ui.yaml | `Deployment` + `Service` + `Ingress` der containerisierten UI (nginx). |
+| deploy/helm/congestion-watch/templates/resourcequota.yaml | `ResourceQuota` fuer den Namespace, begrenzt CPU/Memory je Component fair auf dem geteilten Cluster. |
+
 ## 11. Screenshots und Nachweise
 
 ## 12. Grenzen des Prototyps und Ausblick
