@@ -4,8 +4,21 @@ from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.avro.functions import from_avro, to_avro
 from pyspark.sql.functions import (
-    avg, broadcast, coalesce, col, count, current_timestamp, date_format, dayofweek, expr,
-    first, hour, lit, struct, when, window,
+    avg,
+    broadcast,
+    coalesce,
+    col,
+    count,
+    current_timestamp,
+    date_format,
+    dayofweek,
+    expr,
+    first,
+    hour,
+    lit,
+    struct,
+    when,
+    window,
 )
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
@@ -54,9 +67,7 @@ STARTING_OFFSETS = os.environ.get("STARTING_OFFSETS", "latest")
 # an der bereits stabil laufenden Pipeline vorzunehmen.
 ANOMALY_SCORE_THRESHOLD = float(os.environ.get("ANOMALY_SCORE_THRESHOLD", "2.0"))
 ANOMALY_CONFIRM_WINDOWS = int(os.environ.get("ANOMALY_CONFIRM_WINDOWS", "3"))
-ANOMALY_STATE_TABLE_PATH = os.environ.get(
-    "ANOMALY_STATE_TABLE_PATH", "s3a://gold/anomaly_state"
-)
+ANOMALY_STATE_TABLE_PATH = os.environ.get("ANOMALY_STATE_TABLE_PATH", "s3a://gold/anomaly_state")
 
 
 def read_avro_schema(path: str) -> str:
@@ -66,7 +77,8 @@ def read_avro_schema(path: str) -> str:
 
 def load_seed(spark: SparkSession) -> DataFrame:
     return (
-        spark.read.option("multiline", "true").json(SEED_PATH)
+        spark.read.option("multiline", "true")
+        .json(SEED_PATH)
         .select(
             col("link_id"),
             col("borough").alias("seed_borough"),
@@ -77,8 +89,7 @@ def load_seed(spark: SparkSession) -> DataFrame:
 
 def enrich_with_seed(events: DataFrame, seed: DataFrame) -> DataFrame:
     return (
-        events
-        .join(broadcast(seed), on="link_id", how="left")
+        events.join(broadcast(seed), on="link_id", how="left")
         .withColumn("borough", coalesce(col("seed_borough"), col("borough")))
         .withColumn("link_name", coalesce(col("seed_link_name"), col("link_name")))
         .drop("seed_borough", "seed_link_name")
@@ -94,8 +105,7 @@ def read_weather_stream(spark: SparkSession, weather_schema_json: str) -> DataFr
     observed_at (fachliche Beobachtungszeit), nicht auf ingested_at.
     """
     raw = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC_WEATHER)
         .option("startingOffsets", STARTING_OFFSETS)
@@ -124,19 +134,21 @@ def read_weather_stream(spark: SparkSession, weather_schema_json: str) -> DataFr
 def load_baseline(spark: SparkSession) -> DataFrame:
     """Wird eimalig beim Start geladen und per Broadcast bereitgestellt, nicht jedesmal neu berechnet"""
     return (
-        spark.read.format("delta").load(BASELINE_TABLE_PATH)
+        spark.read.format("delta")
+        .load(BASELINE_TABLE_PATH)
         .select("link_id", "weekday", "hour_of_day", "baseline_speed", "baseline_stddev")
     )
 
 
 def build_spark() -> SparkSession:
     return (
-        SparkSession.builder
-        .appName("congestion-watch-bronze-silver-gold")
+        SparkSession.builder.appName("congestion-watch-bronze-silver-gold")
         .config("spark.sql.shuffle.partitions", "4")
         .config("spark.jars.ivy", "/opt/spark-app/ivy-cache")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config(
+            "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+        )
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
         .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY)
@@ -163,12 +175,7 @@ def append_delta(
     Query), da Bronze und Silver aus demselben Batch stammen, aber getrennte
     Commit-Historien im Delta-Log fuehren.
     """
-    writer = (
-        df.write
-        .format("delta")
-        .mode("append")
-        .option("mergeSchema", "true")
-    )
+    writer = df.write.format("delta").mode("append").option("mergeSchema", "true")
     if txn_app_id is not None and batch_id is not None:
         writer = writer.option("txnAppId", txn_app_id).option("txnVersion", batch_id)
     writer.save(path)
@@ -177,8 +184,7 @@ def append_delta(
 def upsert_gold(batch_df: DataFrame, path: str) -> None:
     if not DeltaTable.isDeltaTable(batch_df.sparkSession, path):
         (
-            batch_df.write
-            .format("delta")
+            batch_df.write.format("delta")
             .mode("overwrite")
             .option("mergeSchema", "true")
             .partitionBy("window_date")
@@ -191,9 +197,7 @@ def upsert_gold(batch_df: DataFrame, path: str) -> None:
     # Wetter-Felder) beim Merge in eine bereits bestehende Zieltabelle -
     # anders als beim initialen .write mit mergeSchema=true, das nur beim
     # allerersten Anlegen der Tabelle greift.
-    batch_df.sparkSession.conf.set(
-        "spark.databricks.delta.schema.autoMerge.enabled", "true"
-    )
+    batch_df.sparkSession.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
     target = DeltaTable.forPath(batch_df.sparkSession, path)
     (
         target.alias("target")
@@ -223,15 +227,10 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
     # link_id auftauchen (5-Min-Fenster, 1-Min-Slide) - nur das neueste
     # Fenster je Segment ist fuer den State-Uebergang relevant.
     latest = (
-        joined
-        .where(col("has_baseline") & col("congestion_score").isNotNull())
+        joined.where(col("has_baseline") & col("congestion_score").isNotNull())
         .withColumn(
             "rn",
-            expr(
-                "row_number() over ("
-                "partition by link_id order by window_start desc"
-                ")"
-            ),
+            expr("row_number() over (" "partition by link_id order by window_start desc" ")"),
         )
         .where(col("rn") == 1)
         .drop("rn")
@@ -240,9 +239,7 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
             col("borough"),
             col("window_start").alias("last_window_start"),
             col("congestion_score").alias("last_score"),
-            (col("congestion_score") >= lit(ANOMALY_SCORE_THRESHOLD)).alias(
-                "is_anomalous_now"
-            ),
+            (col("congestion_score") >= lit(ANOMALY_SCORE_THRESHOLD)).alias("is_anomalous_now"),
         )
     )
 
@@ -251,13 +248,18 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
 
     if not DeltaTable.isDeltaTable(spark, path):
         (
-            latest
-            .withColumn("consecutive_count", when(col("is_anomalous_now"), lit(1)).otherwise(lit(0)))
+            latest.withColumn(
+                "consecutive_count", when(col("is_anomalous_now"), lit(1)).otherwise(lit(0))
+            )
             .withColumn("is_confirmed", lit(False))
-            .withColumn("first_window_start", when(col("is_anomalous_now"), col("last_window_start")))
+            .withColumn(
+                "first_window_start", when(col("is_anomalous_now"), col("last_window_start"))
+            )
             .withColumn("updated_at", current_timestamp())
             .drop("is_anomalous_now")
-            .write.format("delta").mode("overwrite").save(path)
+            .write.format("delta")
+            .mode("overwrite")
+            .save(path)
         )
         return
 
@@ -265,37 +267,39 @@ def upsert_anomaly_state(joined: DataFrame, path: str) -> None:
     (
         target.alias("t")
         .merge(latest.alias("s"), "t.link_id = s.link_id")
-        .whenMatchedUpdate(set={
-            "consecutive_count": (
-                "CASE WHEN s.is_anomalous_now THEN t.consecutive_count + 1 "
-                "ELSE 0 END"
-            ),
-            "is_confirmed": (
-                f"CASE WHEN s.is_anomalous_now AND (t.consecutive_count + 1) >= {ANOMALY_CONFIRM_WINDOWS} "
-                "THEN true WHEN NOT s.is_anomalous_now THEN false "
-                "ELSE t.is_confirmed END"
-            ),
-            
-            "first_window_start": (
-                "CASE WHEN s.is_anomalous_now AND t.consecutive_count = 0 THEN s.last_window_start "
-                "WHEN s.is_anomalous_now THEN t.first_window_start "
-                "ELSE NULL END"
-            ),
-            "borough": "s.borough",
-            "last_window_start": "s.last_window_start",
-            "last_score": "s.last_score",
-            "updated_at": "current_timestamp()",
-        })
-        .whenNotMatchedInsert(values={
-            "link_id": "s.link_id",
-            "borough": "s.borough",
-            "consecutive_count": "CASE WHEN s.is_anomalous_now THEN 1 ELSE 0 END",
-            "is_confirmed": "false",
-            "first_window_start": "CASE WHEN s.is_anomalous_now THEN s.last_window_start END",
-            "last_window_start": "s.last_window_start",
-            "last_score": "s.last_score",
-            "updated_at": "current_timestamp()",
-        })
+        .whenMatchedUpdate(
+            set={
+                "consecutive_count": (
+                    "CASE WHEN s.is_anomalous_now THEN t.consecutive_count + 1 " "ELSE 0 END"
+                ),
+                "is_confirmed": (
+                    f"CASE WHEN s.is_anomalous_now AND (t.consecutive_count + 1) >= {ANOMALY_CONFIRM_WINDOWS} "
+                    "THEN true WHEN NOT s.is_anomalous_now THEN false "
+                    "ELSE t.is_confirmed END"
+                ),
+                "first_window_start": (
+                    "CASE WHEN s.is_anomalous_now AND t.consecutive_count = 0 THEN s.last_window_start "
+                    "WHEN s.is_anomalous_now THEN t.first_window_start "
+                    "ELSE NULL END"
+                ),
+                "borough": "s.borough",
+                "last_window_start": "s.last_window_start",
+                "last_score": "s.last_score",
+                "updated_at": "current_timestamp()",
+            }
+        )
+        .whenNotMatchedInsert(
+            values={
+                "link_id": "s.link_id",
+                "borough": "s.borough",
+                "consecutive_count": "CASE WHEN s.is_anomalous_now THEN 1 ELSE 0 END",
+                "is_confirmed": "false",
+                "first_window_start": "CASE WHEN s.is_anomalous_now THEN s.last_window_start END",
+                "last_window_start": "s.last_window_start",
+                "last_score": "s.last_score",
+                "updated_at": "current_timestamp()",
+            }
+        )
         .execute()
     )
 
@@ -314,8 +318,7 @@ def build_process_batch(baseline: DataFrame):
 
         gold_input = batch_df.where(col("status") == 0).where(~col("is_late_marker"))
         gold_agg = (
-            gold_input
-            .groupBy("window_start", "window_end", "link_id", "borough")
+            gold_input.groupBy("window_start", "window_end", "link_id", "borough")
             .agg(
                 avg("speed_mph").alias("speed_avg"),
                 count("*").alias("sample_count"),
@@ -338,8 +341,7 @@ def build_process_batch(baseline: DataFrame):
         )
 
         joined = (
-            gold_agg
-            .join(broadcast(baseline), on=["link_id", "weekday", "hour_of_day"], how="left")
+            gold_agg.join(broadcast(baseline), on=["link_id", "weekday", "hour_of_day"], how="left")
             .drop("weekday", "hour_of_day")
             # has_baseline erfordert stddev > 0
             .withColumn(
@@ -357,11 +359,11 @@ def build_process_batch(baseline: DataFrame):
                 # kein .otherwise(): bleibt NULL ohne Baseline, wie im Gold-Contract steht
             )
             # Umbenannt von late_event_detected (SCRUM-86) auf den Contract-Namen
-            # is_late_arrival. 
+            # is_late_arrival.
             .withColumn("is_late_arrival", lit(False))
             .withColumn("updated_at", current_timestamp())
         )
-        
+
         joined.persist()
         upsert_gold(joined, GOLD_TABLE_PATH)
         upsert_anomaly_state(joined, ANOMALY_STATE_TABLE_PATH)
@@ -379,8 +381,7 @@ def main() -> None:
     avro_schema_json = read_avro_schema(SCHEMA_PATH)
 
     raw = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC_IN)
         .option("startingOffsets", STARTING_OFFSETS)
@@ -439,17 +440,15 @@ def main() -> None:
 
     window_col = window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE)
     windowed = (
-        with_weather
-        .withColumn("window", window_col)
+        with_weather.withColumn("window", window_col)
         .withColumn("window_start", col("window.start"))
         .withColumn("window_end", col("window.end"))
         .drop("window")
         .withColumnRenamed("is_late", "is_late_marker")
     )
 
-    query = (
-        windowed.writeStream
-        .foreachBatch(build_process_batch(baseline))
+    _query = (
+        windowed.writeStream.foreachBatch(build_process_batch(baseline))
         .option("checkpointLocation", f"{CHECKPOINT_BASE}/bronze-silver-gold")
         .outputMode("append")
         .trigger(processingTime="30 seconds")
@@ -471,11 +470,9 @@ def main() -> None:
     )
 
     late_records = tagged_traffic.where(col("is_late"))
-    dlq_query = (
-        late_records
-        .select(col("kafka_key"), to_avro(dlq_payload).alias("value"))
-        .writeStream
-        .format("kafka")
+    _dlq_query = (
+        late_records.select(col("kafka_key"), to_avro(dlq_payload).alias("value"))
+        .writeStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("topic", KAFKA_TOPIC_DLQ)
         .option("checkpointLocation", f"{CHECKPOINT_BASE}/late-data-dlq")

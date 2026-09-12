@@ -3,7 +3,14 @@ import os
 from pyspark.sql import SparkSession
 from pyspark.sql.avro.functions import from_avro, to_avro
 from pyspark.sql.functions import (
-    avg, col, count, expr, lit, struct, when, window,
+    avg,
+    col,
+    count,
+    expr,
+    lit,
+    struct,
+    when,
+    window,
 )
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
@@ -25,8 +32,7 @@ def read_avro_schema(path: str) -> str:
 
 def main() -> None:
     spark = (
-        SparkSession.builder
-        .appName("congestion-watch-windowed-aggregation")
+        SparkSession.builder.appName("congestion-watch-windowed-aggregation")
         .config("spark.sql.shuffle.partitions", "12")
         .config("spark.jars.ivy", "/opt/spark-app/ivy-cache")
         .getOrCreate()
@@ -36,8 +42,7 @@ def main() -> None:
     avro_schema_json = read_avro_schema(SCHEMA_PATH)
 
     raw = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC_IN)
         .option("startingOffsets", "earliest")
@@ -48,9 +53,7 @@ def main() -> None:
     decoded = (
         raw.select(
             col("key").cast("string").alias("kafka_key"),
-            col("value").substr(
-                CONFLUENT_WIRE_HEADER_BYTES + 1, 1000000
-            ).alias("avro_payload"),
+            col("value").substr(CONFLUENT_WIRE_HEADER_BYTES + 1, 1000000).alias("avro_payload"),
         )
         .select("kafka_key", from_avro(col("avro_payload"), avro_schema_json).alias("event"))
         .select("kafka_key", "event.*")
@@ -65,8 +68,7 @@ def main() -> None:
     late_records = tagged.where(col("is_late"))
 
     aggregated = (
-        tagged
-        .where(~col("is_late"))
+        tagged.where(~col("is_late"))
         .withWatermark("event_time", WATERMARK_DELAY)
         .groupBy(
             window(col("event_time"), WINDOW_DURATION, WINDOW_SLIDE),
@@ -94,9 +96,8 @@ def main() -> None:
         )
     )
 
-    console_query = (
-        aggregated.writeStream
-        .format("console")
+    _console_query = (
+        aggregated.writeStream.format("console")
         .option("truncate", "false")
         .option("checkpointLocation", f"{CHECKPOINT_BASE}/windowed-console")
         .outputMode("update")
@@ -118,14 +119,12 @@ def main() -> None:
         col("source"),
     )
 
-    dlq_query = (
-        late_records
-        .select(
+    _dlq_query = (
+        late_records.select(
             col("kafka_key"),
             to_avro(dlq_payload).alias("value"),
         )
-        .writeStream
-        .format("kafka")
+        .writeStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("topic", KAFKA_TOPIC_DLQ)
         .option("checkpointLocation", f"{CHECKPOINT_BASE}/late-data-dlq")

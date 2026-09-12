@@ -90,17 +90,13 @@ class FixtureReader:
         self.settings = settings
         self.seed = load_seed(settings)
         self._no_baseline = {
-            s["link_id"]
-            for s in self.seed
-            if _stable_fraction("baseline", s["link_id"]) < 31 / 125
+            s["link_id"] for s in self.seed if _stable_fraction("baseline", s["link_id"]) < 31 / 125
         }
 
     def _baseline(self, link_id: str, ts: datetime) -> tuple[float, float]:
         base = 22.0 + 26.0 * _stable_fraction("speed", link_id)
         hour = ts.hour
-        rush = math.exp(-(((hour - 8) / 2.2) ** 2)) + math.exp(
-            -(((hour - 18) / 2.4) ** 2)
-        )
+        rush = math.exp(-(((hour - 8) / 2.2) ** 2)) + math.exp(-(((hour - 18) / 2.4) ** 2))
         weekday_factor = 1.0 if ts.weekday() < 5 else 0.45
         expected = base * (1.0 - 0.42 * rush * weekday_factor)
         stddev = max(1.8, expected * 0.16)
@@ -164,9 +160,7 @@ class FixtureReader:
         )
 
     def latest_windows(self) -> list[SegmentWindow]:
-        window_start = floor_window(datetime.now(timezone.utc)) - timedelta(
-            minutes=WINDOW_MINUTES
-        )
+        window_start = floor_window(datetime.now(timezone.utc)) - timedelta(minutes=WINDOW_MINUTES)
         out = []
         for segment in self.seed:
             w = self._window_for(segment, window_start)
@@ -238,8 +232,7 @@ class BaselineIndex:
             ).to_pylist()
         except Exception as exc:
             log.warning(
-                "Baseline-Tabelle %s nicht lesbar (%s) — alle Segmente gelten "
-                "als unbewertbar",
+                "Baseline-Tabelle %s nicht lesbar (%s) — alle Segmente gelten " "als unbewertbar",
                 self.settings.baseline_uri,
                 exc,
             )
@@ -273,9 +266,7 @@ class BaselineIndex:
         ts = _as_utc(ts)
         weekday, hour = self.spark_weekday(ts), ts.hour
         return {
-            link_id: cell
-            for (link_id, w, h), cell in index.items()
-            if w == weekday and h == hour
+            link_id: cell for (link_id, w, h), cell in index.items() if w == weekday and h == hour
         }
 
     def cells(self) -> int:

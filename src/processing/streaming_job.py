@@ -19,8 +19,7 @@ def read_avro_schema(path: str) -> str:
 
 def main() -> None:
     spark = (
-        SparkSession.builder
-        .appName("congestion-watch-processing")
+        SparkSession.builder.appName("congestion-watch-processing")
         .config("spark.sql.shuffle.partitions", "12")
         .getOrCreate()
     )
@@ -29,8 +28,7 @@ def main() -> None:
     avro_schema_json = read_avro_schema(SCHEMA_PATH)
 
     raw = (
-        spark.readStream
-        .format("kafka")
+        spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("subscribe", KAFKA_TOPIC)
         .option("startingOffsets", "earliest")
@@ -41,9 +39,7 @@ def main() -> None:
     payload_without_header = raw.select(
         col("key").cast("string").alias("kafka_key"),
         col("timestamp").alias("kafka_timestamp"),
-        col("value").substr(
-            CONFLUENT_WIRE_HEADER_BYTES + 1, 1000000
-        ).alias("avro_payload"),
+        col("value").substr(CONFLUENT_WIRE_HEADER_BYTES + 1, 1000000).alias("avro_payload"),
     )
 
     decoded = payload_without_header.select(
@@ -53,8 +49,7 @@ def main() -> None:
     ).select("kafka_key", "kafka_timestamp", "event.*")
 
     query = (
-        decoded.writeStream
-        .format("console")
+        decoded.writeStream.format("console")
         .option("truncate", "false")
         .option("checkpointLocation", CHECKPOINT_DIR)
         .outputMode("append")

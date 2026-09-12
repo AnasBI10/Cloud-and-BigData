@@ -20,10 +20,11 @@ MIN_SAMPLES_PER_CELL = 5
 
 def build_spark() -> SparkSession:
     return (
-        SparkSession.builder
-        .appName("congestion-watch-compute-baseline")
+        SparkSession.builder.appName("congestion-watch-compute-baseline")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config(
+            "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+        )
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
         .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY)
@@ -42,7 +43,7 @@ def main() -> None:
 
     baseline = (
         silver
-        # event_time ist bereits durch silver def gefiltert, daher keine weitere konvertierung 
+        # event_time ist bereits durch silver def gefiltert, daher keine weitere konvertierung
         .withColumn("weekday", dayofweek("event_time"))
         .withColumn("hour_of_day", hour("event_time"))
         .groupBy("link_id", "weekday", "hour_of_day")
@@ -58,8 +59,7 @@ def main() -> None:
     baseline.persist()
 
     (
-        baseline.write
-        .format("delta")
+        baseline.write.format("delta")
         .mode("overwrite")
         .option("overwriteSchema", "true")
         .save(BASELINE_TABLE_PATH)
@@ -67,7 +67,9 @@ def main() -> None:
 
     total_cells = baseline.count()
     distinct_links = baseline.select("link_id").distinct().count()
-    print(f"Baseline geschrieben: {total_cells} Zellen ueber {distinct_links} Segmente nach {BASELINE_TABLE_PATH}")
+    print(
+        f"Baseline geschrieben: {total_cells} Zellen ueber {distinct_links} Segmente nach {BASELINE_TABLE_PATH}"
+    )
 
     baseline.unpersist()
 

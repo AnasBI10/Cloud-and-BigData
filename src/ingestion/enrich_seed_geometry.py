@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import argparse
@@ -21,9 +20,7 @@ LON_RANGE = (-74.4, -73.5)
 
 def fetch_geometry(app_token: str | None) -> dict[str, str]:
     """Je link_id die erste brauchbare Polylinie."""
-    query = urllib.parse.urlencode(
-        {"$select": "link_id,link_points", "$limit": FETCH_LIMIT}
-    )
+    query = urllib.parse.urlencode({"$select": "link_id,link_points", "$limit": FETCH_LIMIT})
     request = urllib.request.Request(f"{ENDPOINT}?{query}")
     if app_token:
         request.add_header("X-App-Token", app_token)
@@ -89,9 +86,7 @@ def main() -> int:
         print("--dry-run: nichts geschrieben")
         return 0
 
-    SEED_PATH.write_text(
-        json.dumps(seed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    SEED_PATH.write_text(json.dumps(seed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{SEED_PATH} geschrieben ({SEED_PATH.stat().st_size // 1024} KB)")
     return 0
 

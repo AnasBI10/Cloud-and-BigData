@@ -97,9 +97,7 @@ def _latest() -> list[SegmentWindow]:
 
 @app.get("/health", response_model=Health, tags=["ops"])
 def health() -> Health:
-    return Health(
-        status="ok", reader=state["reader"].name, ingest=state["ingest"].name
-    )
+    return Health(status="ok", reader=state["reader"].name, ingest=state["ingest"].name)
 
 
 @app.get("/ready", response_model=Health, tags=["ops"])
@@ -141,9 +139,7 @@ def anomalies(
     if borough:
         windows = [w for w in windows if (w.borough or "").lower() == borough.lower()]
 
-    with_baseline = [
-        w for w in windows if w.has_baseline and w.congestion_score is not None
-    ]
+    with_baseline = [w for w in windows if w.has_baseline and w.congestion_score is not None]
     ranked = sorted(
         (w for w in with_baseline if w.congestion_score >= min_score),
         key=lambda w: w.congestion_score,
@@ -221,9 +217,7 @@ def segments() -> SegmentsResponse:
     except ReaderError:
         baseline_links = None
     items = segments_from(state["seed"], windows, baseline_links)
-    return SegmentsResponse(
-        generated_at=datetime.now(timezone.utc), count=len(items), items=items
-    )
+    return SegmentsResponse(generated_at=datetime.now(timezone.utc), count=len(items), items=items)
 
 
 def _segment_or_404(link_id: str) -> dict:
@@ -346,9 +340,10 @@ async def start_scenario(request: ScenarioRequest, response: Response) -> Scenar
 
     reference = request.reference_speed_mph
     if reference is None:
-        reference = state["reader"].reference_speed(
-            request.link_id, datetime.now(timezone.utc)
-        ) or DEFAULT_REFERENCE_SPEED_MPH
+        reference = (
+            state["reader"].reference_speed(request.link_id, datetime.now(timezone.utc))
+            or DEFAULT_REFERENCE_SPEED_MPH
+        )
 
     ingest = state["ingest"]
     ok, detail = ingest.probe()
@@ -365,7 +360,11 @@ async def start_scenario(request: ScenarioRequest, response: Response) -> Scenar
     state["scenarios"].start(run, segment)
     log.info(
         "Szenario %s gestartet: %s auf %s, %d Events ueber %d Minuten",
-        run.id, run.scenario, run.link_id, run.planned_events, run.duration_minutes,
+        run.id,
+        run.scenario,
+        run.link_id,
+        run.planned_events,
+        run.duration_minutes,
     )
     response.headers["Location"] = f"/api/scenarios/{run.id}"
     return ScenarioStatus(**run.as_dict(), ingest=ingest.name)

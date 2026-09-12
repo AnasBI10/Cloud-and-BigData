@@ -9,7 +9,14 @@ from datetime import datetime
 from urllib.parse import urlencode
 
 from pyspark.sql import SparkSession
-from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType, TimestampType
+from pyspark.sql.types import (
+    DoubleType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 SOCRATA_ENDPOINT = "https://data.cityofnewyork.us/resource/i4gi-tjb9.json"
 APP_TOKEN = os.environ.get("SOCRATA_APP_TOKEN")
@@ -21,24 +28,27 @@ MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER", "admin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD", "")
 SILVER_TABLE_PATH = os.environ.get("SILVER_TABLE_PATH", "s3a://bronze/traffic_speeds_valid")
 
-SCHEMA = StructType([
-    StructField("link_id", StringType(), True),
-    StructField("event_time", TimestampType(), True),
-    StructField("speed_mph", DoubleType(), True),
-    StructField("travel_time_s", IntegerType(), True),
-    StructField("status", IntegerType(), True),
-    StructField("borough", StringType(), True),
-    StructField("link_name", StringType(), True),
-    StructField("source", StringType(), True),
-])
+SCHEMA = StructType(
+    [
+        StructField("link_id", StringType(), True),
+        StructField("event_time", TimestampType(), True),
+        StructField("speed_mph", DoubleType(), True),
+        StructField("travel_time_s", IntegerType(), True),
+        StructField("status", IntegerType(), True),
+        StructField("borough", StringType(), True),
+        StructField("link_name", StringType(), True),
+        StructField("source", StringType(), True),
+    ]
+)
 
 
 def build_spark() -> SparkSession:
     return (
-        SparkSession.builder
-        .appName("congestion-watch-backfill-silver")
+        SparkSession.builder.appName("congestion-watch-backfill-silver")
         .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config(
+            "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+        )
         .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
         .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
         .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY)
@@ -83,7 +93,9 @@ def fetch_page(cursor: str) -> list[dict]:
         except urllib.error.HTTPError as exc:
             last_error = exc
             wait = 5 * (attempt + 1)
-            print(f"Socrata-Fehler {exc.code} bei Cursor {cursor}, Versuch {attempt + 1}/5, warte {wait}s")
+            print(
+                f"Socrata-Fehler {exc.code} bei Cursor {cursor}, Versuch {attempt + 1}/5, warte {wait}s"
+            )
             time.sleep(wait)
     raise last_error
 
@@ -119,8 +131,7 @@ def main() -> None:
         rows = [to_row(r) for r in page]
         df = spark.createDataFrame(rows, schema=SCHEMA)
         (
-            df.write
-            .format("delta")
+            df.write.format("delta")
             .mode("append")
             .option("mergeSchema", "true")
             .save(SILVER_TABLE_PATH)

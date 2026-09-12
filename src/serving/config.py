@@ -51,9 +51,7 @@ class Settings:
             s3_secret_key=os.getenv("S3_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD") or None,
             s3_region=os.getenv("S3_REGION", "us-east-1"),
             s3_allow_http=os.getenv("S3_ALLOW_HTTP", "true").lower() == "true",
-            seed_path=pathlib.Path(
-                os.getenv("SEED_PATH", "/app/data/dot_links_seed.json")
-            ),
+            seed_path=pathlib.Path(os.getenv("SEED_PATH", "/app/data/dot_links_seed.json")),
             ingest_mode=os.getenv("INGEST_MODE", "kafka").lower(),
             # Muss zu WATERMARK_DELAY in streaming_job_bsg.py passen.
             watermark_delay_s=int(os.getenv("WATERMARK_DELAY_S", "120")),

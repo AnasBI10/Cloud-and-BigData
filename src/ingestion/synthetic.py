@@ -35,10 +35,30 @@ LATE_SHARE = 0.12
 LATE_OFFSET_S = (180, 420)
 
 HOURLY_FACTOR = [
-    1.00, 1.00, 1.00, 1.00, 0.98, 0.92,  # 0-5
-    0.80, 0.62, 0.48, 0.55, 0.70, 0.75,  # 6-11
-    0.72, 0.70, 0.68, 0.60, 0.50, 0.45,  # 12-17
-    0.52, 0.68, 0.82, 0.90, 0.95, 0.98,  # 18-23
+    1.00,
+    1.00,
+    1.00,
+    1.00,
+    0.98,
+    0.92,  # 0-5
+    0.80,
+    0.62,
+    0.48,
+    0.55,
+    0.70,
+    0.75,  # 6-11
+    0.72,
+    0.70,
+    0.68,
+    0.60,
+    0.50,
+    0.45,  # 12-17
+    0.52,
+    0.68,
+    0.82,
+    0.90,
+    0.95,
+    0.98,  # 18-23
 ]
 
 
@@ -120,7 +140,9 @@ def run(settings: Settings) -> None:
     late = sum(1 for v in offsets.values() if v > OFFSET_MAX_S)
     log.info(
         "synthetischer Modus: %.1f Events/s ueber %d Segmente, davon %d bewusst verspaetet",
-        settings.events_per_second, len(seed), late,
+        settings.events_per_second,
+        len(seed),
+        late,
     )
 
     last_report = time.monotonic()
@@ -139,7 +161,9 @@ def run(settings: Settings) -> None:
             try:
                 baseline = fetch_baseline(settings.baseline_url)
                 baseline_hour = now.hour
-                log.info("Baseline geladen: %d Segmente (Stunde %d UTC)", len(baseline), baseline_hour)
+                log.info(
+                    "Baseline geladen: %d Segmente (Stunde %d UTC)", len(baseline), baseline_hour
+                )
                 baseline_due = time.monotonic() + settings.baseline_refresh_s
             except Exception as exc:
                 log.warning("Baseline nicht abrufbar (%s) — nutze das eigene Profil", exc)

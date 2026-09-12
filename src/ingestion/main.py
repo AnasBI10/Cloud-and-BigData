@@ -26,11 +26,12 @@ def main() -> int:
 
     if settings.mode == "synthetic":
         import synthetic
+
         synthetic.run(settings)
 
     elif settings.mode == "weather":
         import weather
-        
+
         weather.run(settings)
 
     elif settings.mode == "live":

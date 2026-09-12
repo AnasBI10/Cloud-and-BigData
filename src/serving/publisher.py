@@ -54,9 +54,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "speed_factor": lambda p: 1.0 - 0.7 * p,
     },
     "recovery": {
-        "beschreibung": (
-            "Gegenstück zu congestion: von 30 % zurück auf den Ausgangswert."
-        ),
+        "beschreibung": ("Gegenstück zu congestion: von 30 % zurück auf den Ausgangswert."),
         "status": 0,
         "speed_factor": lambda p: 0.3 + 0.7 * p,
     },
@@ -75,8 +73,7 @@ DEFAULT_REFERENCE_SPEED_MPH = 30.0
 
 def scenario_catalog() -> list[dict[str, str]]:
     return [
-        {"name": name, "beschreibung": spec["beschreibung"]}
-        for name, spec in SCENARIOS.items()
+        {"name": name, "beschreibung": spec["beschreibung"]} for name, spec in SCENARIOS.items()
     ]
 
 
@@ -145,7 +142,10 @@ class DryRunIngest:
         self.count += 1
         log.info(
             "DRY-RUN, nicht zugestellt: link_id=%s status=%s speed=%s data_as_of=%s",
-            event["link_id"], event["status"], event["speed_mph"], event["data_as_of"],
+            event["link_id"],
+            event["status"],
+            event["speed_mph"],
+            event["data_as_of"],
         )
 
     def flush(self) -> tuple[int, int]:

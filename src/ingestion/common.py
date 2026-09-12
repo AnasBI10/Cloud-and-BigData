@@ -28,9 +28,7 @@ from confluent_kafka.serialization import (
 
 log = logging.getLogger("ingestion")
 
-SCHEMA_PATH = pathlib.Path(
-    os.getenv("SCHEMA_PATH", "/app/schemas/traffic_speed_event.avsc")
-)
+SCHEMA_PATH = pathlib.Path(os.getenv("SCHEMA_PATH", "/app/schemas/traffic_speed_event.avsc"))
 SEED_PATH = pathlib.Path(os.getenv("SEED_PATH", "/app/data/dot_links_seed.json"))
 
 
@@ -127,13 +125,14 @@ def shard_of(seed: list[dict], settings: Settings) -> list[dict]:
             f"muessen uebereinstimmen"
         )
     boroughs = sorted({s["borough"] for s in seed if s.get("borough")})
-    mine = {
-        b for i, b in enumerate(boroughs) if i % settings.shard_count == settings.shard_index
-    }
+    mine = {b for i, b in enumerate(boroughs) if i % settings.shard_count == settings.shard_index}
     subset = [s for s in seed if s.get("borough") in mine]
     log.info(
         "Shard %d/%d: Boroughs %s, %d Segmente",
-        settings.shard_index, settings.shard_count, sorted(mine), len(subset),
+        settings.shard_index,
+        settings.shard_count,
+        sorted(mine),
+        len(subset),
     )
     return subset
 

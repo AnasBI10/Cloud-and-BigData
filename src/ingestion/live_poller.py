@@ -161,7 +161,9 @@ def run(settings: Settings) -> None:
             lag_min = (datetime.now(timezone.utc) - highest).total_seconds() / 60
             log.info(
                 "%d Records verarbeitet, juengster Messzeitpunkt %s (Feed-Verzoegerung %.1f min)",
-                len(rows), highest.isoformat(), lag_min,
+                len(rows),
+                highest.isoformat(),
+                lag_min,
             )
             watermark = highest
         else:
