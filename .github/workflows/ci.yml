@@ -1,0 +1,124 @@
+name: CI
+
+# SCRUM-XX: Build, Lint und Image-Push fuer alle vier Services (ingestion,
+# processing, serving, ui). Laeuft auf jedem Push/PR gegen dev und main;
+# Image-Push nach ghcr.io nur bei Push auf dev/main (nicht bei PRs von
+# Forks, da dort kein Zugriff auf GITHUB_TOKEN mit Package-Write-Rechten
+# besteht).
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}/congestion-watch
+
+jobs:
+  lint:
+    name: Lint (ruff + black)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install lint tools
+        run: pip install ruff==0.8.4 black==24.10.0
+
+      - name: Ruff (Syntax- und Stilfehler)
+        run: ruff check src/
+
+      - name: Black (Formatierung, nur pruefen)
+        run: black --check --diff src/
+
+  compile-check:
+    name: Compile-Check (py_compile)
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        service: [ingestion, processing, serving]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install service dependencies
+        run: |
+          if [ -f "src/${{ matrix.service }}/requirements.txt" ]; then
+            pip install -r "src/${{ matrix.service }}/requirements.txt"
+          else
+            pip install -r requirements.txt
+          fi
+
+      - name: Compile all Python files in service
+        run: python -m compileall -q "src/${{ matrix.service }}"
+
+  build:
+    name: Build image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: compile-check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: ingestion
+            dockerfile: src/ingestion/Dockerfile
+          - service: processing
+            dockerfile: src/processing/Dockerfile
+          - service: serving
+            dockerfile: src/serving/Dockerfile
+          - service: ui
+            dockerfile: src/ui/Dockerfile
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: tags
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "sha_tag=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "branch_tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and (conditionally) push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }}:${{ steps.tags.outputs.branch_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }}:${{ steps.tags.outputs.sha_tag }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
