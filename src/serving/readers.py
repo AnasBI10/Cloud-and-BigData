@@ -36,6 +36,8 @@ class GoldReader(Protocol):
 
     def reference_speed(self, link_id: str, ts: datetime) -> float | None: ...
 
+    def baseline_profile(self, ts: datetime) -> dict[str, tuple[float, float]]: ...
+
     def baseline_links(self) -> set[str]: ...
 
     def probe(self) -> tuple[bool, str]: ...
@@ -190,6 +192,13 @@ class FixtureReader:
             return None
         return self._baseline(link_id, ts)[0]
 
+    def baseline_profile(self, ts: datetime) -> dict[str, tuple[float, float]]:
+        return {
+            s["link_id"]: self._baseline(s["link_id"], ts)
+            for s in self.seed
+            if s["link_id"] not in self._no_baseline
+        }
+
     def baseline_links(self) -> set[str]:
         return {s["link_id"] for s in self.seed} - self._no_baseline
 
@@ -258,6 +267,16 @@ class BaselineIndex:
         index = self._cache.get(self._load)
         ts = _as_utc(window_start)
         return index.get((link_id, self.spark_weekday(ts), ts.hour))
+
+    def profile(self, ts: datetime) -> dict[str, tuple[float, float]]:
+        index = self._cache.get(self._load)
+        ts = _as_utc(ts)
+        weekday, hour = self.spark_weekday(ts), ts.hour
+        return {
+            link_id: cell
+            for (link_id, w, h), cell in index.items()
+            if w == weekday and h == hour
+        }
 
     def cells(self) -> int:
         return len(self._cache.get(self._load))
@@ -402,6 +421,9 @@ class DeltaReader:
     def reference_speed(self, link_id: str, ts: datetime) -> float | None:
         cell = self.baseline.lookup(link_id, ts)
         return cell[0] if cell else None
+
+    def baseline_profile(self, ts: datetime) -> dict[str, tuple[float, float]]:
+        return self.baseline.profile(ts)
 
     def baseline_links(self) -> set[str]:
         return self.baseline.links()

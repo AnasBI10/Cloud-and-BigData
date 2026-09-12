@@ -23,6 +23,8 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 
+import requests
+
 from common import (
     EventPublisher,
     GracefulExit,
@@ -36,6 +38,13 @@ log = logging.getLogger("ingestion.synthetic")
 
 # Anteil ungueltiger Meldungen, gemessen im 24h-Fenster (DATA_SOURCES.md).
 SENTINEL_SHARE = 0.49
+
+# Wie viele Segmente gleichzeitig in einer Stauphase stecken, und wie stark.
+# Ohne solche Phasen laege jeder Wert auf der Baseline und die Rangliste im
+# Dashboard waere dauerhaft leer.
+ACTIVE_EPISODES = 6
+EPISODE_MIN_S, EPISODE_MAX_S = 300, 1200
+EPISODE_FACTOR = (0.72, 0.93)
 
 # Grober Tagesgang als Faktor auf die Freiflussgeschwindigkeit, Index = Stunde
 # lokaler Zeit. Kein Anspruch auf Realismus im Detail — es geht darum, dass
@@ -60,19 +69,54 @@ def _free_flow_for(link_id: str) -> float:
     return rnd.uniform(25.0, 60.0)
 
 
-def _measurement(link_id: str, now: datetime) -> tuple[int, float | None, int | None]:
+def fetch_baseline(url: str) -> dict[str, tuple[float, float]]:
+    """Erwartungswert und Streuung je Segment fuer die aktuelle Stunde."""
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    payload = resp.json()
+    return {
+        link_id: (cell["baseline_speed"], cell["baseline_stddev"])
+        for link_id, cell in payload.get("items", {}).items()
+    }
+
+
+def refresh_episodes(seed: list[dict], episodes: dict, now: datetime) -> None:
+    for link_id, (until, _) in list(episodes.items()):
+        if now >= until:
+            del episodes[link_id]
+    while len(episodes) < min(ACTIVE_EPISODES, len(seed)):
+        link_id = random.choice(seed)["link_id"]
+        if link_id in episodes:
+            continue
+        episodes[link_id] = (
+            now + timedelta(seconds=random.randint(EPISODE_MIN_S, EPISODE_MAX_S)),
+            random.uniform(*EPISODE_FACTOR),
+        )
+
+
+def _measurement(
+    link_id: str,
+    now: datetime,
+    cell: tuple[float, float] | None,
+    factor: float,
+) -> tuple[int, float | None, int | None]:
     """Liefert (status, speed_mph, travel_time_s) fuer einen Zeitpunkt."""
     if random.random() < SENTINEL_SHARE:
         # Sentinel-Triplett exakt so, wie im Feed beobachtet.
         return -101, 0.0, 0
 
-    base = _free_flow_for(link_id)
-    factor = HOURLY_FACTOR[now.hour]
-    # Wochenende laeuft fluessiger.
-    if now.weekday() >= 5:
-        factor = min(1.0, factor * 1.25)
-
-    speed = max(1.0, random.gauss(base * factor, base * 0.08))
+    if cell is not None:
+        # Um die Baseline streuen, mit deren eigener Streuung: ohne Stauphase
+        # liegt der z-Score dann um null statt systematisch daneben.
+        expected, stddev = cell
+        speed = max(1.0, random.gauss(expected * factor, stddev))
+    else:
+        base = _free_flow_for(link_id)
+        hourly = HOURLY_FACTOR[now.hour]
+        # Wochenende laeuft fluessiger.
+        if now.weekday() >= 5:
+            hourly = min(1.0, hourly * 1.25)
+        speed = max(1.0, random.gauss(base * hourly * factor, base * 0.08))
     # Segmentlaenge unbekannt; travel_time konsistent aus der Geschwindigkeit
     # ableiten, damit beide Felder nicht widerspruechlich sind.
     length_miles = 0.3 + (int(link_id) % 20) / 10 if link_id.isdigit() else 1.0
@@ -96,16 +140,35 @@ def run(settings: Settings) -> None:
     offsets = {s["link_id"]: random.uniform(0, 460) for s in seed}
     last_report = time.monotonic()
 
+    baseline: dict[str, tuple[float, float]] = {}
+    baseline_due = 0.0
+    episodes: dict[str, tuple[datetime, float]] = {}
+
     while not exit_handler.stop:
+        now = datetime.now(timezone.utc)
+
+        if settings.baseline_url and time.monotonic() >= baseline_due:
+            try:
+                baseline = fetch_baseline(settings.baseline_url)
+                log.info("Baseline geladen: %d Segmente", len(baseline))
+                baseline_due = time.monotonic() + settings.baseline_refresh_s
+            except Exception as exc:
+                log.warning("Baseline nicht abrufbar (%s) — falle auf das eigene Profil zurueck", exc)
+                baseline_due = time.monotonic() + 60
+
+        refresh_episodes(seed, episodes, now)
+
         segment = random.choice(seed)
         link_id = segment["link_id"]
-        now = datetime.now(timezone.utc)
         # data_as_of liegt leicht in der Vergangenheit — das erzeugt genau die
         # Verzoegerung zwischen Event Time und Processing Time, an der sich
         # Watermarks und Late-Data-Handling (SCRUM-85) ueberhaupt zeigen lassen.
         data_as_of = now - timedelta(seconds=offsets[link_id])
 
-        status, speed, travel_time = _measurement(link_id, data_as_of)
+        episode = episodes.get(link_id)
+        status, speed, travel_time = _measurement(
+            link_id, data_as_of, baseline.get(link_id), episode[1] if episode else 1.0
+        )
         publisher.publish(
             build_event(
                 link_id=link_id,

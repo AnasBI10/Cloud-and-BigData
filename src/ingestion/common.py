@@ -46,6 +46,8 @@ class Settings:
     dlq_topic: str
     # synthetic
     events_per_second: float
+    baseline_url: str | None
+    baseline_refresh_s: int
     # live
     poll_interval_s: int
     initial_lookback_h: int
@@ -62,6 +64,8 @@ class Settings:
             topic=os.getenv("TOPIC", "traffic.speeds.raw"),
             dlq_topic=os.getenv("DLQ_TOPIC", "traffic.speeds.dlq"),
             events_per_second=float(os.getenv("EVENTS_PER_SECOND", "20")),
+            baseline_url=os.getenv("BASELINE_URL") or None,
+            baseline_refresh_s=int(os.getenv("BASELINE_REFRESH_S", "900")),
             poll_interval_s=int(os.getenv("POLL_INTERVAL_S", "300")),
             # Wie weit der erste Lauf zurueckgreift. Gemessen am 04.09.2026:
             # der DOT-Feed stand ohne Ankuendigung 13 Stunden still (letzter

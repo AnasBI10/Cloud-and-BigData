@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import Settings, setup_logging
 from models import (
     AnomalyResponse,
+    BaselineCell,
+    BaselineResponse,
     EventAck,
     EventRequest,
     Health,
@@ -181,6 +183,30 @@ def timeseries(link_id: str, hours: int = Query(24, ge=1, le=168)) -> Timeseries
         has_baseline=bool(points and points[-1].has_baseline),
         hours=hours,
         points=points,
+    )
+
+
+@app.get("/api/baseline", response_model=BaselineResponse, tags=["gold"])
+def baseline(at: datetime | None = Query(None)) -> BaselineResponse:
+    """Erwartungswert und Streuung je Segment fuer eine Stunde. Der
+    synthetische Producer richtet seine Werte danach aus, damit seine Last
+    nicht dauerhaft als Anomalie erscheint."""
+    ts = at or datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    try:
+        profile = state["reader"].baseline_profile(ts)
+    except ReaderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return BaselineResponse(
+        generated_at=datetime.now(timezone.utc),
+        at=ts,
+        count=len(profile),
+        items={
+            link_id: BaselineCell(baseline_speed=speed, baseline_stddev=stddev)
+            for link_id, (speed, stddev) in profile.items()
+        },
     )
 
 

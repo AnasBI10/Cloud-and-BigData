@@ -7,6 +7,7 @@ data:
   KAFKA_BOOTSTRAP: "kafka:9092"
   SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
   EVENTS_PER_SECOND: {{ .Values.producer.synthetic.eventsPerSecond | quote }}
+  BASELINE_URL: "http://serving-api/api/baseline"
 ---
 apiVersion: v1
 kind: Secret

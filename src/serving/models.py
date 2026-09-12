@@ -42,6 +42,18 @@ class SegmentWindow(BaseModel):
     is_late_arrival: bool = False
 
 
+class BaselineCell(BaseModel):
+    baseline_speed: float
+    baseline_stddev: float
+
+
+class BaselineResponse(BaseModel):
+    generated_at: datetime
+    at: datetime = Field(description="Zeitpunkt, fuer den die Zelle gilt")
+    count: int
+    items: dict[str, BaselineCell]
+
+
 class AnomalyResponse(BaseModel):
     generated_at: datetime
     reader: str = Field(description="fixture | delta")

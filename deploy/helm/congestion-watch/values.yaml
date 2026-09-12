@@ -47,7 +47,7 @@ schemaRegistry:
     limits:   { cpu: 250m, memory: 1Gi }
 
 producer:
-  image: congestion-watch/ingestion:0.1.4
+  image: congestion-watch/ingestion:0.1.5
   synthetic:
     eventsPerSecond: 5
     resources:
@@ -73,7 +73,7 @@ socrata:
   appToken: "CHANGE_ME"
 
 serving:
-  image: congestion-watch/serving:0.2.1
+  image: congestion-watch/serving:0.2.2
   # Auf die tatsaechliche UI-Origin eingrenzen, sobald der Ingress-Host
   # feststeht (z. B. "http://congestion-watch.example"). Siehe Kommentar in
   # templates/serving.yaml.
