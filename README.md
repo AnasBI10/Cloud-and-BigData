@@ -312,9 +312,129 @@ für alle Rohwerte und Herleitungen.
 
 ## 4. Komponenten und Datenfluss
 
+### 4.1 Uebersicht
+
+Der komplette Datenfluss folgt der Kappa-Architektur aus Kapitel 3: Ein einziger Verarbeitungspfad von der Ingestion bis zur Anzeige, keine getrennten Batch-/Speed-Layer. Drei Producer-Typen (synthetic, live, weather) sowie die UI im Datenlieferant-Modus schreiben nach Kafka. Spark Structured Streaming liest beide Topics, wendet den Statusfilter an, joint den Wetterstrom hinzu, aggregiert in Zeitfenstern und schreibt parallel nach Bronze, Silver und Gold auf MinIO. Die Serving-API liest ausschliesslich aus Gold und stellt die Ergebnisse der UI zur Anzeige bereit.
+
+### 4.2 Komponenten im Detail
+
+| Komponente | Technologie | Begruendung der Wahl |
+|---|---|---|
+| Ingestion (3 Producer-Typen) | Python, confluent-kafka mit Avro-Serializer | Ein gemeinsames Client-Modul (src/ingestion/common.py) fuer alle drei Modi (synthetic/live/weather) vermeidet, dieselbe Serialisierungslogik dreifach zu pflegen. |
+| Nachrichten-Bus | Apache Kafka 3.9 (KRaft-Mode, 3 Broker) | Entkoppelt Producer und Consumer zeitlich; KRaft statt ZooKeeper reduziert die Anzahl der zu betreibenden Komponenten. |
+| Schema-Vertrag | Confluent Schema Registry, Avro | Durchsetzt Kompatibilitaet beim Registrieren, nicht erst beim Absturz eines Consumers (Kapitel 3.3). |
+| Stream Processing | Spark Structured Streaming (PySpark) | Native Watermark-/Windowing-Unterstuetzung, Stream-Static-Join, und foreachBatch fuer die Delta-Sinks in einer Bibliothek. |
+| Speicher | MinIO (S3-kompatibel) + Delta Lake | Siehe Kapitel 3.3 und 6. |
+| Serving | FastAPI + deltalake (Rust-Binding, kein Spark/JVM) | Die API muss nur lesen, nicht rechnen -- ein schlanker Reader ohne Spark-Overhead startet schneller und braucht keinen Executor. |
+| UI | Statisches HTML/JS/CSS, nginx | Kein Build-Schritt, kein Fremd-CDN zur Laufzeit (Kapitel 7.4). |
+
+### 4.3 Ende-zu-Ende-Datenfluss (konkretes Beispiel)
+
+1. Ein DOT-Sensor (oder die UI im Datenlieferant-Modus) erzeugt ein Ereignis mit link_id, speed_mph, status, data_as_of.
+2. Der Producer serialisiert es gegen das registrierte Avro-Schema und publiziert es nach traffic.speeds.raw, partitioniert nach link_id.
+3. Der Spark-Job liest das Ereignis, reichert es um Segment-Stammdaten und den letzten bekannten Wetterstand desselben Boroughs an.
+4. Ist status != 0 (ungueltige Messung), landet das Ereignis nur in Bronze, nicht in Silver oder der Aggregation.
+5. Gueltige Ereignisse werden in einem gleitenden 5-Minuten-Fenster aggregiert, gegen die Baseline gescored und in Gold geschrieben (MERGE).
+6. Der Anomalie-Zustandsautomat aktualisiert consecutive_count/is_confirmed fuer das betroffene Segment.
+7. Die Serving-API liest bei der naechsten Anfrage (/api/segments, /api/anomalies) die aktualisierten Gold-Zeilen ueber PyArrow.
+8. Das Dashboard pollt die API alle 20 Sekunden und stellt den neuen Zustand auf der Karte bzw. in der Anomalie-Rangliste dar.
+
+Dieser Fluss ist bei einem UI-eingespeisten Ereignis identisch (Kapitel 7.1) -- es gibt keinen Seiteneingang direkt in die Gold-Schicht.
+
+### 4.4 Technologiewahl: durchgaengig Python
+
+Ingestion, Processing (PySpark) und Serving sind bewusst in derselben Sprache gehalten. Das reduziert die Anzahl der Laufzeitumgebungen (ein gemeinsames Basis-Image-Muster, dieselbe Toolchain fuer Lint/Test in der CI-Pipeline) und erleichtert es, Datenmodelle (z. B. das Avro-Schema-Verstaendnis) zwischen den Komponenten zu teilen, ohne sie in mehreren Sprachen neu zu definieren.
+
 ## 5. Processing-Logik
 
+### 5.1 Transformationskette
+
+Der Spark-Structured-Streaming-Job (`src/processing/streaming_job_bsg.py`) verarbeitet zwei unabhaengige Kafka-Quellen in einer einzigen Anwendung:
+
+1. **Dekodierung**: Avro-Payload aus `traffic.speeds.raw` bzw. `weather.observations.raw` wird gegen das jeweils registrierte Schema aus der Schema-Registry dekodiert.
+2. **Anreicherung (Broadcast-Join)**: Jedes Verkehrsereignis wird gegen die Segment-Stammdaten (`enrich_with_seed()`) angereichert -- Borough und Segmentname, falls im Event selbst nicht vorhanden.
+3. **Nicht-trivialer Enrichment-Join (Stream-Static)**: Das angereicherte Verkehrsereignis wird gegen den zuletzt bekannten Wetterstand desselben Boroughs angereichert (`read_weather_stream()`), bevor eine Aggregation stattfindet -- siehe 5.2 fuer die Watermark-Behandlung.
+4. **Statusfilter**: Nur Ereignisse mit `status == 0` (gueltige Messung) gelangen in die Silver-Schicht und die Aggregation; der Filter steht an genau einer Stelle im Code (Kappa-Prinzip, Kapitel 3.1).
+5. **Windowed Aggregation**: Durchschnittsgeschwindigkeit je Segment in gleitenden 5-Minuten-Fenstern (siehe 5.3).
+6. **Baseline-Join und Score-Berechnung**: Das aggregierte Fenster wird gegen die vorab per Batch-Job berechnete Baseline (`compute_baseline.py`, Broadcast) gejoint; der Congestion-Score ist die standardisierte Abweichung `(baseline_speed - speed_avg) / baseline_stddev`.
+7. **Stateful Anomalie-Erkennung**: Ein Zustandsautomat je Segment zaehlt aufeinanderfolgende Fenster ueber der Score-Schwelle und bestaetigt eine Anomalie erst nach mehreren Fenstern in Folge (siehe 5.4).
+8. **Persistenz**: Bronze (alle Ereignisse), Silver (gueltige Ereignisse) und Gold (aggregierte Scores) werden parallel geschrieben (Kapitel 6).
+
+### 5.2 Windowing und Watermarks
+
+| Stream | Fenstergroesse | Slide | Watermark | Begruendung |
+|---|---|---|---|---|
+| Verkehr (`traffic.speeds.raw`) | 5 Minuten | 1 Minute | 2 Minuten | Meldefrequenz je Sensor liegt bei ~7,7 Minuten (Kapitel 2); ein gleitendes statt springendes Fenster glaettet die Score-Kurve zwischen zwei Sensor-Updates. |
+| Wetter (`weather.observations.raw`) | -- (Stream-Static-Join, kein eigenes Fenster) | -- | 20 Minuten | Open-Meteo aktualisiert nur stuendlich; eine grosszuegigere Watermark verhindert, dass ein leicht verspaeteter Wetter-Poll-Batch faelschlich als "zu spaet" verworfen wird. |
+
+Beide Watermarks sind bewusst unterschiedlich, weil die beiden Stroeme unterschiedliche Aktualisierungsfrequenzen haben (Kapitel 2, Variety) -- eine gemeinsame Watermark haette entweder den Verkehrsstrom unnoetig verzoegert oder den Wetterstrom zu aggressiv verworfen.
+
+### 5.3 Late Data
+
+Ereignisse, deren `event_time` (aus `data_as_of`) aelter ist als die aktuelle Zeit minus der Watermark (2 Minuten), werden als "late" markiert (`is_late`-Flag, berechnet **vor** dem Wetter-Join, damit die Markierung nur vom Verkehrsstrom selbst abhaengt). Verspaetete Ereignisse werden von der Gold-Aggregation ausgeschlossen und stattdessen in die Dead-Letter-Queue (`traffic.speeds.dlq`) geschrieben -- inklusive Original-Payload fuer eine spaetere Analyse. Diese Entscheidung ist bewusst konservativ: Ein bereits geschriebenes Gold-Fenster nachtraeglich zu korrigieren, haette einen Wechsel von Append- auf Update-Ausgabemodus verlangt (siehe Kapitel 12, Ausblick).
+
+### 5.4 Stateful Processing: Anomalie-Erkennung mit Zustandsverwaltung
+
+Ein einzelner auffaelliger Congestion-Score kann Messrauschen sein. `upsert_anomaly_state()` fuehrt deshalb je Segment einen ueber Batches hinweg persistenten Zustand in einer eigenen Delta-Tabelle (`gold/anomaly_state`):
+
+- Bei jedem Batch wird pro Segment das juengste Fenster betrachtet: Liegt der Score ueber der Schwelle (`ANOMALY_SCORE_THRESHOLD`, Default 2,0 Standardabweichungen), erhoeht sich `consecutive_count` um 1; sonst wird er auf 0 zurueckgesetzt.
+- Eine Anomalie gilt erst als **bestaetigt** (`is_confirmed = true`), wenn `consecutive_count` eine Mindestanzahl (`ANOMALY_CONFIRM_WINDOWS`, Default 3) aufeinanderfolgender Fenster erreicht.
+- Umgesetzt ueber ein Delta-`MERGE` (kein natives `flatMapGroupsWithState`), bewusst um keinen zweiten zustandsbehafteten Checkpoint-Pfad in derselben Streaming-Query einzufuehren.
+
+Das unterscheidet einen kurzfristigen Ausreisser (einzelnes lautes Fenster) von einer echten, anhaltenden Verkehrsstoerung -- ohne diesen Mechanismus wuerde jede einzelne Messschwankung sofort als Anomalie gemeldet.
+
+### 5.5 Exactly-once-Semantik
+
+Drei unterschiedliche Absicherungsstufen, je nach Sink (siehe auch Kapitel 12 fuer die bewusste Ausnahme):
+
+- **Bronze/Silver (Delta-Append)**: `txnAppId`/`txnVersion` (Batch-ID als Version) machen einen wiederholten Append nach einem Crash-Neustart zum No-Op, statt Duplikate anzuhaengen.
+- **Gold und Anomaly-State (Delta-MERGE)**: Von Natur aus idempotent, da der Merge-Schluessel (`link_id` + `window_start` bzw. `link_id`) eine wiederholte Anwendung desselben Batches auf denselben Zielzustand abbildet.
+- **DLQ (Kafka-Sink)**: At-least-once, da Spark Structured Streaming keine transaktionale Kafka-Producer-API besitzt (bewusst akzeptierte Ausnahme, siehe Kapitel 12).
+
 ## 6. Speicherkonzept
+
+### 6.1 Warum Data Lake / Lakehouse statt klassischer Datenbank
+
+Drei unterschiedliche, aber verwandte Datensaetze (Rohereignisse, validierte Ereignisse, aggregierte Scores) muessen dieselbe zugrundeliegende Quelle wiederverwenden koennen, ohne sie mehrfach zu kopieren. Ein Lakehouse (Delta Lake auf MinIO) erlaubt genau das: Bronze/Silver/Gold sind alle eigenstaendige Delta-Tabellen auf demselben Objektspeicher, ohne dass ein ETL-Tool zwischen einer OLTP- und einer OLAP-Datenbank vermitteln muesste. Eine klassische relationale Datenbank waere fuer den Bronze-Layer (Rohereignisse, schreiblastig, kein Bedarf an Transaktionen ueber mehrere Zeilen) unpassend teuer gewesen.
+
+### 6.2 Bronze / Silver / Gold
+
+| Layer | Pfad | Inhalt | Schreibmodus |
+|---|---|---|---|
+| Bronze | `s3a://bronze/traffic_speeds_raw` | Alle Rohereignisse, inklusive ungueltiger (`status != 0`) | Append, idempotent via `txnAppId`/`txnVersion` (Kapitel 5) |
+| Silver | `s3a://bronze/traffic_speeds_valid` | Nur Ereignisse mit `status == 0` (gueltige Messungen) | Append, idempotent via `txnAppId`/`txnVersion` |
+| Gold | `s3a://gold/congestion_scores` | Aggregierte 5-Minuten-Fenster je Segment, mit Baseline-Score und Wetter-Anreicherung | MERGE (Upsert), siehe Kapitel 5 |
+| Gold (Zustand) | `s3a://gold/anomaly_state` | Laufender Zaehler aufeinanderfolgender auffaelliger Fenster je Segment (SCRUM-83) | MERGE (Upsert) |
+
+Bronze bewahrt bewusst auch ungueltige Ereignisse: Der Statusfilter (Kapitel 2, Veracity) soll an genau einer Stelle im Code stehen, nicht beim Schreiben nach Bronze bereits vorweggenommen werden -- sonst gaebe es zwei Filterimplementierungen, die auseinanderlaufen koennten.
+
+### 6.3 Format: Delta Lake statt reines Parquet
+
+Delta Lake wurde bewusst gegenueber reinem Parquet gewaehlt (siehe auch Kapitel 3.3):
+
+- **ACID-Commits**: Ein Leser (die Serving-API) sieht nie eine halbgeschriebene Datei, selbst wenn der Streaming-Job mitten in einem Batch abstuerzt.
+- **MERGE-Unterstuetzung**: Gold und der Anomalie-Zustand sind Upserts (Schluessel: `link_id` + `window_start` bzw. `link_id`), reines Parquet kennt kein natives Merge.
+- **Schema Evolution**: `mergeSchema=true` beim Bronze/Silver-Append und `ALTER TABLE ADD COLUMNS` fuer Gold (siehe Kapitel 5) erlauben nachtraegliche Spaltenerweiterungen (z. B. die Wetterfelder aus SCRUM-84b), ohne die Tabelle neu anzulegen.
+
+### 6.4 Partitionierung Gold
+
+Die Gold-Tabelle ist nach `window_date` (Format `yyyy-MM-dd`, aus `window_start` abgeleitet) partitioniert. Begruendung: Die Serving-API fragt ueberwiegend die juengsten Fenster ab (`/api/anomalies`, `/api/segments` lesen nur die letzten 15 Minuten, siehe Kapitel 10); eine Partitionierung nach Tag erlaubt Partition Pruning und vermeidet, dass jede Leseanfrage die komplette Historie scannen muss.
+
+### 6.5 Kafka als Teil des Speicherkonzepts
+
+Auch die Kafka-Topics sind Teil des Speicherkonzepts, da Kappa-Architektur bedeutet, dass Historie (Reprocessing) ueber denselben Stream laeuft wie der Live-Betrieb (Kapitel 3.1):
+
+| Topic | Partitionen | Replikationsfaktor | Retention | Key |
+|---|---|---|---|---|
+| `traffic.speeds.raw` | 12 | 3 | 7 Tage | `link_id` |
+| `weather.observations.raw` | 5 | 3 | 7 Tage | `borough` |
+| `traffic.speeds.dlq` | 3 | 3 | 14 Tage | -- |
+
+Der Partitionsschluessel (`link_id` bzw. `borough`) garantiert, dass alle Ereignisse desselben Segments bzw. Bezirks in derselben Partition und damit in Reihenfolge ankommen -- Voraussetzung fuer deterministische Windowed Aggregation. 12 Partitionen bei `traffic.speeds.raw` geben Spielraum fuer den Skalierungsnachweis (mehr parallele Consumer moeglich), ohne bei 125 aktiven Sensoren unnoetig viele duenn befuellte Partitionen zu erzeugen. Replikationsfaktor 3 mit `min.insync.replicas=2` passt zum 3-Broker-Cluster: ein Broker-Ausfall fuehrt nicht zu Datenverlust oder Schreibstopp. Details und die vollstaendige Herleitung stehen in [`docs/topics-und-partitionierung.md.
+
+### 6.6 Objektspeicher: MinIO statt HDFS
+
+Siehe Kapitel 3.3 fuer die vollstaendige Begruendung. Kurzfassung: Auf Kubernetes ist Compute ohnehin von Storage getrennt; ein HDFS-NameNode waere ein zusaetzlicher Single Point of Failure ohne Data-Locality-Vorteil. MinIO ist S3-kompatibel (Standard-API, `hadoop-aws`/`s3a://` funktioniert unveraendert) und laesst sich bei Bedarf in den Distributed-Mode skalieren (im Prototyp bewusst Single-Node, siehe Kapitel 12).
 
 ## 7. User-facing UI
 
@@ -483,6 +603,37 @@ gleiche Herkunft — der Browser braucht dafür kein CORS.
 
 
 ## 8. Kubernetes-Deployment
+
+### 8.1 Abbildung der Komponenten auf Workload-Typen
+
+| Komponente | Workload-Typ | Begruendung |
+|---|---|---|
+| Kafka (3 Broker) | StatefulSet | Braucht stabile Netzwerkidentitaet und persistenten Storage je Broker (KRaft-Quorum, Partitionsdaten). |
+| Schema-Registry | Deployment (2 Replikas) | Zustandslos -- der Zustand liegt im eigenen `_schemas`-Kafka-Topic, nicht im Pod. |
+| MinIO | StatefulSet (1 Replika) | Objektspeicher braucht ein stabiles PVC; Single-Node-Modus fuer den Prototyp ausreichend (siehe Kapitel 12). |
+| Producer synthetic | Deployment + HPA | Zustandslos, beliebig horizontal skalierbar -- genau der Lastgenerator, an dem Skalierung vorgefuehrt wird. |
+| Producer live (DOT-Poller) | StatefulSet | Der Shard-Index wird aus dem Pod-Ordinal abgeleitet (Sharding der 125 Segmente auf mehrere Repliken); ein Deployment wuerde allen Repliken dieselbe Kennung geben. |
+| Producer weather | Deployment | Zustandslos, pollt Open-Meteo unabhaengig vom Traffic-Producer. |
+| Processing (Spark-Streaming-Job) | Deployment (1 Replika) + PVC | Genau ein Job-Prozess haelt den Streaming-Checkpoint; das PVC sichert Fortschritt ueber Neustarts hinweg. |
+| Baseline-Neuberechnung | CronJob | Rein periodische Batch-Aufgabe (alle 6 Stunden), kein Dauerbetrieb noetig. |
+| Serving-API | Deployment + HPA | Zustandslos (liest nur aus Delta), horizontal skalierbar fuer Lastspitzen von der UI. |
+| UI (nginx) | Deployment + HPA | Statische Assets, zustandslos, horizontal skalierbar. |
+
+### 8.2 Konfiguration und Persistenz
+
+- **ConfigMaps**: `ingestion-config` (Kafka-Bootstrap, Producer-Parameter), `kafka` (Broker-Konfiguration), `processing` (Topic-Namen, Schema-Pfade, MinIO-Endpunkt), `serving` (API-Einstellungen), `ui` (Laufzeit-Konfiguration fuer `config.js`, siehe Kapitel 7.4).
+- **Secrets**: `socrata-credentials` (NYC-DOT-App-Token), `minio-credentials` (Root-Zugangsdaten fuer MinIO, von Processing und Serving-API referenziert).
+- **PersistentVolumeClaims**: je ein PVC fuer Kafka (je Broker, StatefulSet-VolumeClaimTemplate), MinIO (Objektdaten) und Processing (Streaming-Checkpoints). Alle nutzen die Cluster-Default-StorageClass (`local-path`), keine explizite `storageClassName` im Manifest (siehe Kapitel 9).
+
+### 8.3 Skalierung
+
+Drei Komponenten sind mit `HorizontalPodAutoscaler` ausgestattet: Producer synthetic, Serving-API und UI. Alle skalieren nach CPU-Auslastung. Der Lastgenerator (`producer-synthetic`) ist bewusst der primaere Skalierungsnachweis: Seine Ereignisrate laesst sich ueber `EVENTS_PER_SECOND` gezielt erhoehen, um die HPA-Reaktion sichtbar zu demonstrieren (Screenshot in Kapitel 11).
+
+Kafka, MinIO und der Processing-Job skalieren bewusst **nicht** horizontal automatisiert: Kafka-Replikationsfaktor und Partitionsanzahl sind statisch im Manifest gesetzt (Skalierung hier bedeutet Repartitionierung, kein einfaches Hochsetzen von `replicas`), MinIO laeuft im Prototyp als Single-Node (siehe Kapitel 12), und der Spark-Streaming-Job haelt genau einen Checkpoint-Zustand -- eine zweite Replika wuerde denselben Checkpoint doppelt beschreiben statt die Last zu teilen.
+
+### 8.4 Namespace und Ressourcengrenzen
+
+Alle Komponenten laufen im Namespace `bigdata` mit einer `ResourceQuota` (`resourcequota.yaml`), die CPU-, Memory- und PVC-Kontingente fuer den gesamten Namespace begrenzt -- notwendig, da der Cluster mit anderen Gruppen geteilt wird (siehe Kapitel 9).
 
 ## 9. Deployment-Anleitung
 
