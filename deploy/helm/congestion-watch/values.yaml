@@ -49,8 +49,7 @@ schemaRegistry:
 producer:
   image: congestion-watch/ingestion:0.1.4
   synthetic:
-    replicas: 1
-    eventsPerSecond: 20
+    eventsPerSecond: 5
     resources:
       requests: { cpu: 100m, memory: 128Mi }
       limits:   { cpu: 250m, memory: 256Mi }

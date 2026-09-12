@@ -25,7 +25,9 @@ metadata:
   labels:
     app: producer-synthetic
 spec:
-  replicas: {{ .Values.producer.synthetic.replicas }}
+  # Kein replicas: Die HorizontalPodAutoscaler weiter unten verwaltet dieses
+  # Feld. Stuende es hier, setzte jedes helm upgrade die Skalierung der HPA
+  # wieder auf den Chart-Wert zurueck.
   selector:
     matchLabels:
       app: producer-synthetic
@@ -33,6 +35,11 @@ spec:
     metadata:
       labels:
         app: producer-synthetic
+      annotations:
+        # envFrom liest die ConfigMap nur beim Pod-Start. Ohne Pruefsumme
+        # laeuft der Producer nach einer Aenderung von EVENTS_PER_SECOND mit
+        # dem alten Wert weiter.
+        checksum/config: {{ .Values.producer.synthetic.eventsPerSecond | toString | sha256sum }}
     spec:
       containers:
         - name: producer
