@@ -761,31 +761,33 @@ neu abgleichen.
 
 ### Kubernetes-Deployment (Kapitel 8)
 
-![Kubernetes-Ressourcen imtype1.png
+screenshots/kubernetesresstype1.png
 *Alle Ressourcentypen im Namespace `bigdata`, Teil 1.*
 
-![Kubernetes-Ressourcen im Namespace,Alle Ressourcentypen im Namespace `bigdata`, Teil 2.*
+screenshots/kubernetesresstype2.png
+*Alle Ressourcentypen im Namespace `bigdata`, Teil 2.*
 
-![Alle Pods laufend, ueber mehrere Nget pods -n bigdata -o wide` -- alle Komponenten `Running`, verteilt ueber `ny-master`, `ny-worker-1`, `ny-worker-2`.*
+screenshots/alle_pods.png
+*`kubectl get pods -n bigdata -o wide` -- alle Komponenten `Running`, verteilt ueber `ny-master`, `ny-worker-1`, `ny-worker-2`.*
 
-![Workload-Typen imdtypen-uberblick.png
+screenshots/workloadtypen-uberblick.png
 *Deployments, StatefulSets und CronJobs im Namespace -- Abbildung auf Workload-Typen wie in Kapitel 8.1 begruendet.*
 
-![Helm-Release-Statuss.png
+screenshots/helmstatus.png
 *`helm status congestion-watch -n bigdata` -- Release erfolgreich deployt.*
 
 screenshots/configmaps-secrets.png
 *Konfigurations- und Zugangsdaten-Objekte im Namespace (Kapitel 8.2).*
 
-![PersistentVolumeClavolume.png
+screenshots/persistenvolume.png
 *Gebundene PVCs fuer Kafka, MinIO und Processing-Checkpoints.*
 
-![ResourceQuota des Namespaceng
+screenshots/ressource-quota.png
 *CPU-/Memory-/PVC-Kontingent, notwendig da der Cluster mit anderen Gruppen geteilt wird (Kapitel 8.4, Kapitel 9).*
 
 ### Architektur und Ingestion (Kapitel 3, 4)
 
-![Kafka-Topics](a_topics.png
+screenshots/Kafka_topics.png
 *Registrierte Topics `traffic.speeds.raw`, `weather.observations.raw`, `traffic.speeds.dlq`.*
 
 screenshots/Schema-registry.png
@@ -794,51 +796,57 @@ screenshots/Schema-registry.png
 screenshots/producer.png
 *Lastgenerator liefert kontinuierlich Ereignisse.*
 
-![Producer weather im Betrieb](screenshotsoller liefert Ereignisse je Borough im 5-Minuten-Takt.*
+screenshots/producer_weather.png
+*Wetter-Poller liefert Ereignisse je Borough im 5-Minuten-Takt.*
 
-![Producer live: echte NYC-DOT-Daten](screenshots/NYC-dot-producergmente aus dem NYC-DOT-Feed (`source=DOT_LIVE`) -- zentrales Argument aus Kapitel 1.2.*
+screenshots/NYC-dot-producer.png
+*Live-Poller verarbeitet echte Segmente aus dem NYC-DOT-Feed (`source=DOT_LIVE`) -- zentrales Argument aus Kapitel 1.2.*
 
 ### Processing-Logik (Kapitel 5)
 
-![Spark-Streaming-Job laeuft stabil](screenshots/Spark-jobBatches ohne Absturz.*
+screenshots/Spark-job.png
+*Der Processing-Job verarbeitet Batches ohne Absturz.*
 
-![Stateful Anomalie-Erkennungg.png
+screenshots/Anomalie-Erkennung.png
 *`gold/anomaly_state`-Tabelle mit `consecutive_count`/`is_confirmed` -- Zustandsautomat ueber mehrere Batches hinweg (Kapitel 5.4, SCRUM-83).*
 
-![DLQ faengt verspaetete Events ab](screenshots/DLQte-Data-Handling: verspaetete Ereignisse landen in `traffic.speeds.dlq` statt in der Gold-Aggregation (Kapitel 5.3).*
+screenshots/DLQ-faengt-verspatete-events-ab.png
+*Late-Data-Handling: verspaetete Ereignisse landen in `traffic.speeds.dlq` statt in der Gold-Aggregation (Kapitel 5.3).*
 
-![Baselines/baseline.png
+screenshots/baseline.png
 *Periodische Baseline-Neuberechnung (CronJob) liefert die Referenzwerte fuer den Congestion-Score.*
 
 ### Speicherkonzept (Kapitel 6)
 
-![MinIO-ots/minio-buckets.png
+screenshots/minio-buckets.png
 *Buckets `bronze` und `gold` auf dem Objektspeicher.*
 
-![Delta-Tabellenstruktur mstruktur.png
+screenshots/deltatabellen-struktur.png
 *`_delta_log/`-Transaktionslog und `window_date=...`-Partitionsordner der Gold-Tabelle (Kapitel 6.4).*
 
 ### Skalierung
 
-![HPA-Status vor Lasterhoehung](screenshots/htoscaler mit Ausgangs-Replikazahl.*
+screenshots/hpa-status.png
+*Horizontal Pod Autoscaler mit Ausgangs-Replikazahl.*
 
-![HPA-Status nach Lasterhoehung](scre.png
+screenshots/hpa-status-nach-erhoehung.png
 *Nach Erhoehung von `EVENTS_PER_SECOND` skaliert der Producer automatisch auf mehr Replikas (Kapitel 8.3).*
 
 ### CI/CD-Pipeline
 
-![GitHub Actions Pipeline](scre*Lint-, Compile-Check- und Build-Jobs der CI/CD-Pipeline.*
+screenshots/CI-CD-pipeline.png
+*Lint-, Compile-Check- und Build-Jobs der CI/CD-Pipeline.*
 
 ### Reflexion und Eigenanteil (Kapitel 12)
 
-![Git-Commit-History, Teil 1](screenshots/commProjektentwicklung anhand der Commit-History.*
+screenshots/commit-history-1.png
+*Verlauf der Projektentwicklung anhand der Commit-History.*
 
-![Git-Commit-History, Teil-2.png
+screenshots/commit-history-2.png
 *Fortsetzung der Commit-History.*
 
-![Commit-Verteilung nachach-namen.png
+screenshots/commitment-nach-namen.png
 *Bereinigte Commit-Verteilung je Teammitglied (Kapitel 12.0), Autoren-Aliase ueber `.mailmap` zusammengefuehrt.*
-
 
 ## 12. Grenzen des Prototyps und Ausblick
 
