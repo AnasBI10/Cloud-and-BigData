@@ -759,27 +759,28 @@ neu abgleichen.
 
 ## 11. Screenshots und Nachweise
 
-### UI und Anzeige
-
-![Kubernetes-Ressourcen im Namespace, Teil 1](screenshots/kubernetesresstypeata`, Teil 1.*
-
-screenshots/kubernetesresstype2.png
-*Alle Ressourcentypen im Namespace `bigdata`, Teil 2.*
-
 ### Kubernetes-Deployment (Kapitel 8)
 
-![Alle Pods laufend, ueber mehrere Nodes ver -n bigdata -o wide` — alle Komponenten `Running`, verteilt ueber `ny-master`, `ny-worker-1`, `ny-worker-2`.*
+![Kubernetes-Ressourcen imtype1.png
+*Alle Ressourcentypen im Namespace `bigdata`, Teil 1.*
+
+![Kubernetes-Ressourcen im Namespace,Alle Ressourcentypen im Namespace `bigdata`, Teil 2.*
+
+![Alle Pods laufend, ueber mehrere Nget pods -n bigdata -o wide` -- alle Komponenten `Running`, verteilt ueber `ny-master`, `ny-worker-1`, `ny-worker-2`.*
 
 ![Workload-Typen imdtypen-uberblick.png
-*Deployments, StatefulSets und CronJobs im Namespace — Abbildung auf Workload-Typen wie in Kapitel 8.1 begruendet.*
+*Deployments, StatefulSets und CronJobs im Namespace -- Abbildung auf Workload-Typen wie in Kapitel 8.1 begruendet.*
 
-![Helm-Release-Status](screenshotsstatus congestion-watch -n bigdata` — Release erfolgreich deployt.*
+![Helm-Release-Statuss.png
+*`helm status congestion-watch -n bigdata` -- Release erfolgreich deployt.*
 
-![ConfigMaps und Secrets](screenshots/configmtions- und Zugangsdaten-Objekte im Namespace (Kapitel 8.2).*
+screenshots/configmaps-secrets.png
+*Konfigurations- und Zugangsdaten-Objekte im Namespace (Kapitel 8.2).*
 
-![PersistentVolumeClaims](screenshots/persistCs fuer Kafka, MinIO und Processing-Checkpoints.*
+![PersistentVolumeClavolume.png
+*Gebundene PVCs fuer Kafka, MinIO und Processing-Checkpoints.*
 
-screenshots/ressource-quota.png
+![ResourceQuota des Namespaceng
 *CPU-/Memory-/PVC-Kontingent, notwendig da der Cluster mit anderen Gruppen geteilt wird (Kapitel 8.4, Kapitel 9).*
 
 ### Architektur und Ingestion (Kapitel 3, 4)
@@ -787,55 +788,57 @@ screenshots/ressource-quota.png
 ![Kafka-Topics](a_topics.png
 *Registrierte Topics `traffic.speeds.raw`, `weather.observations.raw`, `traffic.speeds.dlq`.*
 
-![Schema-Registry: registrierte
+screenshots/Schema-registry.png
 *Beide Subjects (`traffic.speeds.raw-value`, `weather.observations.raw-value`) erfolgreich registriert.*
 
-![Producer synthetic im Betrieb](screenshotsert kontinuierlich Ereignisse.*
+screenshots/producer.png
+*Lastgenerator liefert kontinuierlich Ereignisse.*
 
-![Producer weather im Betrieb](screenter-Poller liefert Ereignisse je Borough im 5-Minuten-Takt.*
+![Producer weather im Betrieb](screenshotsoller liefert Ereignisse je Borough im 5-Minuten-Takt.*
 
-![Producer live: echte NYC-DOT-Daten](screler verarbeitet echte Segmente aus dem NYC-DOT-Feed (`source=DOT_LIVE`) — zentrales Argument aus Kapitel 1.2.*
+![Producer live: echte NYC-DOT-Daten](screenshots/NYC-dot-producergmente aus dem NYC-DOT-Feed (`source=DOT_LIVE`) -- zentrales Argument aus Kapitel 1.2.*
 
 ### Processing-Logik (Kapitel 5)
 
-![Spark-Streaming-Job laeuft stabil](screenshots/Spark-job.atches ohne Absturz.*
+![Spark-Streaming-Job laeuft stabil](screenshots/Spark-jobBatches ohne Absturz.*
 
-![Stateful Anomalie-Erkennung](png
-*`gold/anomaly_state`-Tabelle mit `consecutive_count`/`is_confirmed` — Zustandsautomat ueber mehrere Batches hinweg (Kapitel 5.4, SCRUM-83).*
+![Stateful Anomalie-Erkennungg.png
+*`gold/anomaly_state`-Tabelle mit `consecutive_count`/`is_confirmed` -- Zustandsautomat ueber mehrere Batches hinweg (Kapitel 5.4, SCRUM-83).*
 
-screenshots/DLQ-faengt-verspatete-events-ab.png
-*Late-Data-Handling: verspaetete Ereignisse landen in `traffic.speeds.dlq` statt in der Gold-Aggregation (Kapitel 5.3).*
+![DLQ faengt verspaetete Events ab](screenshots/DLQte-Data-Handling: verspaetete Ereignisse landen in `traffic.speeds.dlq` statt in der Gold-Aggregation (Kapitel 5.3).*
 
-![Baseline-Jobseline.png
+![Baselines/baseline.png
 *Periodische Baseline-Neuberechnung (CronJob) liefert die Referenzwerte fuer den Congestion-Score.*
 
 ### Speicherkonzept (Kapitel 6)
 
-![MinIO-Buckets](screenshots/minio-ets `bronze` und `gold` auf dem Objektspeicher.*
+![MinIO-ots/minio-buckets.png
+*Buckets `bronze` und `gold` auf dem Objektspeicher.*
 
-![Delta-Tabellenstruktur mit Partitpng
+![Delta-Tabellenstruktur mstruktur.png
 *`_delta_log/`-Transaktionslog und `window_date=...`-Partitionsordner der Gold-Tabelle (Kapitel 6.4).*
 
 ### Skalierung
 
-![HPA-Status vor Lasus.png
-*Horizontal Pod Autoscaler mit Ausgangs-Replikazahl.*
+![HPA-Status vor Lasterhoehung](screenshots/htoscaler mit Ausgangs-Replikazahl.*
 
-![HPA-Status nach Lasterhoehung](screenng
+![HPA-Status nach Lasterhoehung](scre.png
 *Nach Erhoehung von `EVENTS_PER_SECOND` skaliert der Producer automatisch auf mehr Replikas (Kapitel 8.3).*
 
 ### CI/CD-Pipeline
 
-![GitHub Actions Pipeline](screenshots/CI-CD-e-Check- und Build-Jobs der CI/CD-Pipeline.*
+![GitHub Actions Pipeline](scre*Lint-, Compile-Check- und Build-Jobs der CI/CD-Pipeline.*
 
 ### Reflexion und Eigenanteil (Kapitel 12)
 
-![Git-Commit-History,story-1.png
-*Verlauf der Projektentwicklung anhand der Commit-History.*
+![Git-Commit-History, Teil 1](screenshots/commProjektentwicklung anhand der Commit-History.*
 
-![Git-Commit-History, Teil 2](screenshots/ung der Commit-History.*
+![Git-Commit-History, Teil-2.png
+*Fortsetzung der Commit-History.*
 
-![Commit-Verteilung nach Autor](screenshots/comme Commit-Verteilung je Teammitglied (Kapitel 12.0), Autoren-Aliase ueber `.mailmap` zusammengefuehrt.*
+![Commit-Verteilung nachach-namen.png
+*Bereinigte Commit-Verteilung je Teammitglied (Kapitel 12.0), Autoren-Aliase ueber `.mailmap` zusammengefuehrt.*
+
 
 ## 12. Grenzen des Prototyps und Ausblick
 
