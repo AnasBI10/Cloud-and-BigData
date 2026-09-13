@@ -796,6 +796,21 @@ neu abgleichen.
 
 ## 12. Grenzen des Prototyps und Ausblick
 
+### 12.0 Aufgabenverteilung im Team
+
+Sechs Personen haben am Projekt mitgewirkt. Die Aufteilung ergab sich groesstenteils entlang der Komponenten und ist anhand der Git-History nachvollziehbar (`git log --author=... --name-only`):
+
+| Person | Schwerpunkt | Belegt durch (Datei-Aenderungen) |
+|---|---|---|
+| Anas Boudhaim | Kubernetes-Deployment (Helm-Chart) und Stream Processing | deploy/helm (22), src/processing (20), src/ingestion (9), README/Doku (8+) |
+| victortschauder | Deployment, UI und Serving-Layer, mit Beitraegen im Processing | src/ui (23), deploy/helm (22), src/serving (15), src/processing (15) |
+| Buenyamin Tasci | Serving-API und UI | src/serving (19), src/ui (14), deploy/helm (8) |
+| Gettogoofy | Ingestion und Kafka-Manifeste | src/ingestion (7), k8s/kafka (6), Screenshots/Doku |
+| Jessica Ruppel | Vereinzelte Beitraege ueber mehrere Bereiche | src/ingestion, src/ui, src/processing (je 1) |
+| David | Architekturdiagramm und Doku-Review | abb/architektur-final.svg, README.md |
+
+**Deployment war Schwerpunkt von zwei Personen** (Anas Boudhaim und victortschauder, beide mit den meisten Aenderungen unter `deploy/helm`), **die UI-Entwicklung lag primaer bei zwei weiteren Personen** (victortschauder und Buenyamin Tasci), und **Dokumentation/Nachweise** wurden groesstenteils von Anas Boudhaim (README-Kapitel, Setup-Doku) sowie punktuell von Gettogoofy (Screenshots, Topic-Doku) und David (Architekturdiagramm) getragen. Die Aufteilung war nicht strikt exklusiv -- die meisten Komponenten (Helm-Chart, Processing-Job) wurden von mehreren Personen gemeinsam weiterentwickelt, was sich auch an den ueberlappenden Dateibereichen in der Tabelle zeigt.
+
 ### Was bewusst nicht umgesetzt wurde
 
 - Kafka-DLQ-Sink ist at-least-once, nicht exactly-once. Anders als die Delta-Sinks (Bronze/Silver via txnAppId/txnVersion, Gold und Anomaly-State via MERGE) hat Spark Structured Streaming keine native transaktionale Producer-API fuer Kafka-Sinks. Bei einer Batch-Wiederholung nach einem Absturz koennen doppelte Eintraege in traffic.speeds.dlq entstehen. Bewusst akzeptiert, da die DLQ ein Diagnosepfad ist und keine Downstream-Aggregation auf ihr aufsetzt.
