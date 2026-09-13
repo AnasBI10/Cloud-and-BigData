@@ -73,7 +73,7 @@ socrata:
   appToken: "CHANGE_ME"
 
 serving:
-  image: congestion-watch/serving:0.2.2
+  image: congestion-watch/serving:0.2.3
   # Auf die tatsaechliche UI-Origin eingrenzen, sobald der Ingress-Host
   # feststeht (z. B. "http://congestion-watch.example"). Siehe Kommentar in
   # templates/serving.yaml.
@@ -108,7 +108,7 @@ ui:
     host: ""
 
 processing:
-  image: congestion-watch/processing:0.9.1
+  image: congestion-watch/processing:0.9.2
   checkpointStorage: 1Gi
   streaming:
     startingOffsets: latest
