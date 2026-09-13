@@ -275,41 +275,6 @@ Beide gehören vor SCRUM-77/-84 in den Sprint-1-Zeitplan, siehe Backlog-Übersic
 
 ---
 
-## Offene Punkte
-
-### Abgeschlossen (Sprint 0)
-
-Alle Datenbeschaffung (App-Token, SODA3-Test, Kennzahlen, Baseline-Export, Wetter-Export)
-sowie die Abschnitte 1–3 dieser README sind fertig — siehe [`DATA_SOURCES.md`](./DATA_SOURCES.md)
-für alle Rohwerte und Herleitungen.
-
-### Noch offen, vor bzw. während Sprint 1 zu klären
-
-- [ ] **Abschnitt 12 fehlt in dieser Datei** — Inhalt (Scope-Grenzen: keine Vorhersage,
-      keine Ursachenzuordnung, keine Routenberechnung, keine Abrechnungszahlen,
-      Baseline-Lücke bei ~31 Sensoren, Wetterraster-Einschränkung) liegt bereits
-      vorformuliert vor, muss nur noch eingefügt werden.
-- [ ] **Zwei neue Tickets ins Backlog aufnehmen** (siehe Abschnitt 3.4): Wetter-Poller
-      (Sprint 1, blockiert SCRUM-84) und Spark auf Kubernetes deployen (Sprint 1, RBAC + Checkpoint-PVC).
-- [ ] **An SCRUM-74 weitergeben:** Avro-Schema braucht den zusammengesetzten Schlüssel
-      `link_id` + `data_as_of` — es gibt kein Feld, das eine Einzelmessung eindeutig identifiziert.
-- [ ] **An SCRUM-78 weitergeben:** Entscheidung *single* vs. *distributed mode* für MinIO
-      vorziehen — horizontale Skalierung ist nur im distributed mode möglich und wird beim
-      Deployment festgelegt.
-- [ ] **An SCRUM-81 weitergeben:** Poll-Intervall Wetter (5 Min.), Socrata-App-Token als
-      Secret, Cache-Staleness-Verhalten beim DOT-Poll-Intervall berücksichtigen.
-- [ ] **An SCRUM-83 weitergeben:** Baseline-Schlüssel = `link_id` × Wochentag × Stunde;
-      Segmente ohne ausreichende Historie (~31 von 125) laufen ohne Baseline-Vergleich,
-      bis genug Live-Daten vorliegen.
-- [ ] **An SCRUM-90 weitergeben:** Open-Meteo-Attributionstext im Dashboard-Footer einbauen
-      (Lizenzpflicht, kein Nice-to-have) — Text liegt in `DATA_SOURCES.md` vor.
-- [ ] Ende-zu-Ende-Latenz messen, sobald SCRUM-77 läuft (aktuell Platzhalter in Abschnitt 2, Velocity).
-- [ ] Sprachwahl (Python durchgängig für Ingestion, Processing, Serving) in Abschnitt 4 als
-      ein Satz begründen, sobald Abschnitt 4 geschrieben wird.
-- [ ] Baseline-Parquet-Dateien nach MinIO verschieben, sobald SCRUM-78 steht; Pfad in
-      `DATA_SOURCES.md` nachtragen.
-
-
 ## 4. Komponenten und Datenfluss
 
 ### 4.1 Uebersicht
@@ -793,6 +758,84 @@ neu abgleichen.
 | deploy/helm/congestion-watch/templates/resourcequota.yaml | `ResourceQuota` fuer den Namespace, begrenzt CPU/Memory je Component fair auf dem geteilten Cluster. |
 
 ## 11. Screenshots und Nachweise
+
+### UI und Anzeige
+
+![Kubernetes-Ressourcen im Namespace, Teil 1](screenshots/kubernetesresstypeata`, Teil 1.*
+
+screenshots/kubernetesresstype2.png
+*Alle Ressourcentypen im Namespace `bigdata`, Teil 2.*
+
+### Kubernetes-Deployment (Kapitel 8)
+
+![Alle Pods laufend, ueber mehrere Nodes ver -n bigdata -o wide` — alle Komponenten `Running`, verteilt ueber `ny-master`, `ny-worker-1`, `ny-worker-2`.*
+
+![Workload-Typen imdtypen-uberblick.png
+*Deployments, StatefulSets und CronJobs im Namespace — Abbildung auf Workload-Typen wie in Kapitel 8.1 begruendet.*
+
+![Helm-Release-Status](screenshotsstatus congestion-watch -n bigdata` — Release erfolgreich deployt.*
+
+![ConfigMaps und Secrets](screenshots/configmtions- und Zugangsdaten-Objekte im Namespace (Kapitel 8.2).*
+
+![PersistentVolumeClaims](screenshots/persistCs fuer Kafka, MinIO und Processing-Checkpoints.*
+
+screenshots/ressource-quota.png
+*CPU-/Memory-/PVC-Kontingent, notwendig da der Cluster mit anderen Gruppen geteilt wird (Kapitel 8.4, Kapitel 9).*
+
+### Architektur und Ingestion (Kapitel 3, 4)
+
+![Kafka-Topics](a_topics.png
+*Registrierte Topics `traffic.speeds.raw`, `weather.observations.raw`, `traffic.speeds.dlq`.*
+
+![Schema-Registry: registrierte
+*Beide Subjects (`traffic.speeds.raw-value`, `weather.observations.raw-value`) erfolgreich registriert.*
+
+![Producer synthetic im Betrieb](screenshotsert kontinuierlich Ereignisse.*
+
+![Producer weather im Betrieb](screenter-Poller liefert Ereignisse je Borough im 5-Minuten-Takt.*
+
+![Producer live: echte NYC-DOT-Daten](screler verarbeitet echte Segmente aus dem NYC-DOT-Feed (`source=DOT_LIVE`) — zentrales Argument aus Kapitel 1.2.*
+
+### Processing-Logik (Kapitel 5)
+
+![Spark-Streaming-Job laeuft stabil](screenshots/Spark-job.atches ohne Absturz.*
+
+![Stateful Anomalie-Erkennung](png
+*`gold/anomaly_state`-Tabelle mit `consecutive_count`/`is_confirmed` — Zustandsautomat ueber mehrere Batches hinweg (Kapitel 5.4, SCRUM-83).*
+
+screenshots/DLQ-faengt-verspatete-events-ab.png
+*Late-Data-Handling: verspaetete Ereignisse landen in `traffic.speeds.dlq` statt in der Gold-Aggregation (Kapitel 5.3).*
+
+![Baseline-Jobseline.png
+*Periodische Baseline-Neuberechnung (CronJob) liefert die Referenzwerte fuer den Congestion-Score.*
+
+### Speicherkonzept (Kapitel 6)
+
+![MinIO-Buckets](screenshots/minio-ets `bronze` und `gold` auf dem Objektspeicher.*
+
+![Delta-Tabellenstruktur mit Partitpng
+*`_delta_log/`-Transaktionslog und `window_date=...`-Partitionsordner der Gold-Tabelle (Kapitel 6.4).*
+
+### Skalierung
+
+![HPA-Status vor Lasus.png
+*Horizontal Pod Autoscaler mit Ausgangs-Replikazahl.*
+
+![HPA-Status nach Lasterhoehung](screenng
+*Nach Erhoehung von `EVENTS_PER_SECOND` skaliert der Producer automatisch auf mehr Replikas (Kapitel 8.3).*
+
+### CI/CD-Pipeline
+
+![GitHub Actions Pipeline](screenshots/CI-CD-e-Check- und Build-Jobs der CI/CD-Pipeline.*
+
+### Reflexion und Eigenanteil (Kapitel 12)
+
+![Git-Commit-History,story-1.png
+*Verlauf der Projektentwicklung anhand der Commit-History.*
+
+![Git-Commit-History, Teil 2](screenshots/ung der Commit-History.*
+
+![Commit-Verteilung nach Autor](screenshots/comme Commit-Verteilung je Teammitglied (Kapitel 12.0), Autoren-Aliase ueber `.mailmap` zusammengefuehrt.*
 
 ## 12. Grenzen des Prototyps und Ausblick
 
